@@ -34,6 +34,7 @@ Aplikace má:
 5. **Denní data jsou dostačující.** Aplikace není tradingový terminál a v první fázi nepotřebuje placená real-time data.
 6. **Každé číslo musí být vysvětlitelné.** U ceny, FX kurzu, expozice i importu se ukládá zdroj, čas a kvalita.
 7. **AI má pouze čtecí přístup.** ChatGPT nikdy nedostane obecný SQL nástroj, přístup k brokerskému účtu ani možnost měnit portfolio.
+8. **Cílový hosting je Vercel.** Produkční web, API a plánované importní úlohy se nasazují z tohoto GitHub monorepa na Vercel; uživatel neprovozuje žádnou lokální komponentu.
 
 ## 2. Rozsah
 
@@ -50,7 +51,7 @@ Aplikace má:
 | Expozice | ekonomická třída aktiv, sektor, geografie, měna, efektivní podkladové pozice a překryvy ETF |
 | Automatizace | e-mailový import pro George, XTB a realizované obchody z Patrie; kontrolní výpisy a řízený fallback pro úplnost a reconciliaci |
 | ChatGPT | read-only Portfolio API zabalené jako ChatGPT app / MCP; Google Drive AI mirror jako fallback a auditovatelný snapshot |
-| Provoz | single-user aplikace, audit importů, monitoring čerstvosti dat, zálohy |
+| Provoz | cloud-only single-user aplikace na Vercelu, audit importů, monitoring čerstvosti dat, zálohy |
 
 ### Výslovně mimo fázi 1
 
@@ -326,7 +327,7 @@ Heslo k dokumentům není přihlašovací heslo do XTB. Aplikace v první fázi 
 - plaintext se neukládá do souboru, databáze, logu, cache, error reportu ani zálohy aplikace;
 - šifrovaný originální PDF dokument lze archivovat, dešifrovaná kopie se trvale neukládá;
 - při chybě dešifrování vznikne stav `PASSWORD_INVALID` bez zalogování hesla. Uživatel zadá nové heslo přes zabezpečený formulář, backend ho uloží jako novou verzi secretu a otestuje na čekajícím PDF;
-- konkrétní služba — například AWS Secrets Manager, Google Cloud Secret Manager nebo Azure Key Vault — se zvolí společně s hostingem; aplikační rozhraní zůstane vendor-neutral.
+- cílová služba je AWS Secrets Manager + KMS, ke kterým importní Vercel projekt přistupuje přes Vercel OIDC a krátkodobé AWS credentials. Aplikační rozhraní zůstane vendor-neutral, aby bylo možné poskytovatele později vyměnit.
 
 PDF pipeline:
 
@@ -457,7 +458,7 @@ Efektivní váha podkladu v portfoliu je váha fondu v portfoliu násobená vaho
 
 ## 7. Architektura
 
-Cloud-only architektura nevyžaduje instalaci agenta, plánované úlohy ani úložiště na uživatelově počítači. Veškeré automatické importy, parsování a výpočty běží v hostovaném prostředí; uživatel potřebuje pouze běžný webový prohlížeč.
+Cloud-only architektura běží na Vercelu a nevyžaduje instalaci agenta, plánované úlohy ani úložiště na uživatelově počítači. Veškeré automatické importy, parsování a výpočty spouštějí Vercel Functions; uživatel potřebuje pouze běžný webový prohlížeč.
 
 ```mermaid
 flowchart TD
@@ -475,32 +476,60 @@ flowchart TD
 
 | Komponenta | Odpovědnost |
 | --- | --- |
-| Web | Next.js / React dashboard, single-user přihlášení, grafy, filtry, import health |
-| API | Python + FastAPI, doménová pravidla, ledger, dotazy, OpenAPI kontrakt |
-| Worker | parsování, Gmail polling, ceny, FX, holdings, snapshots, reconciliace |
-| Databáze | PostgreSQL, canonical ledger a odvozené snapshoty |
-| Raw archive | šifrované originální dokumenty pro audit; oddělené od veřejného úložiště |
-| Secret manager | Gmail OAuth refresh token, heslo k XTB PDF a provozní secrets; oddělené IAM role a audit |
+| Hosting a CI/CD | Vercel napojený na GitHub; produkční a preview deployment při změně příslušné větve |
+| Web | Next.js / React ve Vercel projektu `portfolio-web`; dashboard, přihlášení, grafy a import health |
+| API | Python + FastAPI jako Vercel Function v projektu `portfolio-api`; doménová pravidla, dotazy a OpenAPI kontrakt |
+| Jobs | Python Vercel Functions v projektu `portfolio-jobs`; parsování, Gmail, ceny, FX, snapshots a reconciliace |
+| Scheduler | Vercel Cron volající chráněné a idempotentní job endpointy |
+| Databáze | Neon PostgreSQL provisionovaný přes Vercel Marketplace; canonical ledger a odvozené snapshoty |
+| Raw archive | privátní Vercel Blob; originální dokumenty navíc aplikačně šifrované před uložením |
+| Secret manager | AWS Secrets Manager + KMS přes Vercel OIDC; Gmail refresh token, heslo k XTB PDF a audit |
 | AI adapter | read-only MCP nástroje nad stejnou aplikační službou jako dashboard |
 | AI mirror | stabilní Markdown/CSV/JSON snapshoty v dedikovaném Google Drive |
 
-Redis ani složitý message broker nejsou pro první osobní verzi povinné. Plánované úlohy může zpočátku obsloužit samostatný worker s databázovou tabulkou jobů a PostgreSQL advisory lockem. Fronta se přidá až při prokázané potřebě.
+Vercel Functions jsou bezstavové a neběží nepřetržitě. Plánované úlohy proto spouští Vercel Cron a jejich stav drží databázová tabulka jobů. Každý job je idempotentní, používá PostgreSQL advisory lock a umí pokračovat po menších dávkách. Tím se návrh neopírá o nekonečný proces ani o maximální dobu jedné Function invocation.
 
-### 7.2 Nasazení
+Redis ani složitý message broker nejsou pro první osobní verzi povinné. Vercel Queues nebo Vercel Workflows lze vyhodnotit později, ale první fáze na jejich beta funkcích nestojí.
+
+### 7.2 Nasazení na Vercel
+
+Jeden GitHub monorepo se připojí ke třem Vercel projektům s různými root directories a oprávněními:
+
+| Vercel projekt | Obsah | Oprávnění |
+| --- | --- | --- |
+| `portfolio-web` | Next.js dashboard a BFF | uživatelská session, omezené read API; bez XTB/Gmail secretů |
+| `portfolio-api` | FastAPI portfolio API a MCP adapter | PostgreSQL aplikační role; bez práva číst XTB/Gmail secrety |
+| `portfolio-jobs` | importní a analytické Functions + Cron endpoints | PostgreSQL write role, privátní Blob a přes OIDC pouze potřebné AWS secrety |
 
 Cílová varianta:
 
-- API, web, importní/analytický worker, PostgreSQL, secret manager a šifrovaný raw archive běží nepřetržitě v cloudu za HTTPS;
+- web, API a jobs běží jako Vercel Functions za HTTPS; nejde o trvale běžící server;
+- GitHub `main` nasazuje production, pull requesty vytvářejí Vercel Preview deployments;
+- preview prostředí používá syntetická data, oddělenou databázi/Blob a jiné secrets; nikdy se nepřipojuje k produkčnímu portfoliu;
 - přístup je single-user a chráněný OIDC / passkey-capable autentizací;
 - serverový Gmail adaptér používá OAuth refresh token uložený v secret manageru a funguje i při vypnutém počítači uživatele;
 - heslo k XTB PDF je samostatný verzovaný secret, dostupný pouze importnímu workeru;
+- Vercel OIDC token se v `portfolio-jobs` vymění za krátkodobé AWS oprávnění; v projektu není dlouhodobý AWS access key;
 - přihlašovací údaje do XTB, Patrie ani George se nikde v aplikaci neukládají;
 - kontrolní dokument, který nelze získat e-mailem, se nahraje přes webový prohlížeč přímo do ingestion API;
-- raw dokumenty jsou šifrované samostatným klíčem a mají definovanou retenční politiku;
+- raw dokumenty se před uložením aplikačně zašifrují a uloží do private Vercel Blob s definovanou retenční politikou;
+- PostgreSQL poskytne Neon přes Vercel Marketplace; Vercel Postgres se nepoužívá, protože pro nové projekty již není dostupný;
+- citlivé odpovědi dashboardu a API používají `Cache-Control: private, no-store` a nesmí se uložit do Vercel CDN cache;
+- Vercel Sensitive Environment Variables slouží jen pro statickou deployment konfiguraci. Uživatelsky měnitelné XTB heslo a Gmail refresh token zůstávají v AWS Secrets Manageru, aby jejich změna nevyžadovala redeploy;
 - žádná část systému nevyžaduje lokální službu, cron, Docker, keychain ani trvale zapnutý osobní počítač;
-- vývojové prostředí používá Docker Compose a syntetická data.
+- Vercel region funkcí se umístí co nejblíže regionu Neon databáze; přesný EU region se potvrdí při založení infrastruktury;
+- lokální vývoj vývojáře může používat Docker Compose a výhradně syntetická data, ale není součástí uživatelského provozu.
 
-### 7.3 Navržená struktura monorepa
+### 7.3 Plánované a delší úlohy
+
+- Vercel Cron volá pouze produkční, autentizované endpointy a pracuje v UTC.
+- Cron endpoint nejprve vytvoří/rezervuje job v PostgreSQL a rychle zabrání souběžnému duplicitnímu běhu.
+- Gmail kontrola se plánuje na 5–15 minut, pokud to zvolený Vercel plán umožní; jinak se použije Gmail `users.watch` / Pub/Sub webhook a pomalejší Cron jako recovery mechanismus.
+- Import jednoho dokumentu a jeden analytický batch musí respektovat nakonfigurovaný `maxDuration`; velký backfill se rozdělí na více jobů.
+- Chyba Function invocation neztratí stav, protože checkpoint a retry metadata jsou v PostgreSQL.
+- Limity zvoleného Vercel plánu — frekvence Cronu, doba Functions, počet deploymentů a spotřeba — se ověří acceptance testem před produkčním provozem.
+
+### 7.4 Navržená struktura monorepa
 
 ```text
 portfolio/
@@ -774,6 +803,10 @@ Alarm má být akční: například „XTB e-mail nebyl 30 dní“ nemusí být 
 - XTB pokyn rozdělený na celý kus a frakční právo vytvoří jeden rodičovský pokyn a dva legy, nikoli duplicitu;
 - pouze importní workload identity načte XTB secret; identity webu a AI API dostanou explicitní `access denied`;
 - serverový Gmail import a denní ocenění proběhnou i při vypnutém uživatelském počítači;
+- souběžné nebo opakované Vercel Cron invocation zarezervují nejvýše jeden aktivní job;
+- job přerušený limitem Vercel Function pokračuje z posledního databázového checkpointu;
+- OIDC token z `portfolio-web`, `portfolio-api` nebo preview prostředí nemůže převzít produkční AWS importní roli;
+- raw dokument v private Vercel Blob nelze načíst bez autorizace a po uložení odpovídá aplikačně šifrovanému obsahu;
 - nákup v EUR, ocenění v CZK a následná FX změna;
 - převod mezi dvěma sledovanými účty nemění výnos celého portfolia;
 - split nebo jiná korporátní akce zachová ekonomickou hodnotu;
@@ -791,12 +824,14 @@ Alarm má být akční: například „XTB e-mail nebyl 30 dní“ nemusí být 
 - vytvořit bezpečně anonymizované nebo plně syntetické golden fixtures;
 - sepsat přesné mapování polí a brokerových typů transakcí;
 - ověřit všechny reálné ISIN/listingy u bezplatných price providerů;
-- rozhodnout režim hostingu, raw retention a autentizaci;
+- založit oddělené Vercel projekty, Neon databázi, private Blob a OIDC trust do AWS;
+- rozhodnout raw retention, single-user autentizaci, Vercel plán a EU region;
 - založit ADR pro ledger, import fingerprints, FX konvenci a benchmarky.
 
 ### Milník 1 — canonical ledger a ruční backfill
 
 - monorepo, CI, databáze a migrace;
+- GitHub → Vercel production/preview deployment se striktně oddělenými daty;
 - broker/account/instrument/listing model;
 - append-only ledger a import audit;
 - XTB CSV a dostupné George/Patria historické importy;
@@ -858,15 +893,19 @@ Fáze 1 je hotová, pokud:
 12. žádný AI nástroj ani dashboard neumí zadat obchod;
 13. záloha byla úspěšně obnovena v odděleném prostředí;
 14. repozitář a test fixtures neobsahují osobní finanční data ani secrets;
-15. pravidelná aktualizace funguje bez lokálního agenta a bez zapnutého osobního počítače.
+15. pravidelná aktualizace funguje bez lokálního agenta a bez zapnutého osobního počítače;
+16. produkce běží na Vercelu a preview deployment nemá přístup k produkční databázi, Blob ani secretům.
 
 ## 16. Otevřená rozhodnutí před implementací
 
 Nejde o změny produktového směru, ale o technická rozhodnutí, která vyžadují vzorky dokumentů nebo cílové prostředí:
 
 - přesné varianty HTML/PDF/CSV každého brokera a jejich změny v čase;
-- hosting webu/API/PostgreSQL/workeru a způsob single-user autentizace;
-- konkrétní cloudový secret manager a IAM/workload identity model;
+- konkrétní Vercel plán podle potřebné Cron frekvence, Function duration a očekávané spotřeby;
+- přesný EU region Vercel Functions a Neon databáze;
+- acceptance test Vercel Python Runtime pro velikost PDF dependencies, cold start a `maxDuration`;
+- způsob single-user autentizace;
+- detail AWS OIDC trust policy, IAM role a KMS key policy pro `portfolio-jobs`;
 - retenční doba raw výpisů;
 - UX a recovery postup při rotaci nebo zapomenutí hesla k XTB PDF;
 - tolerance reconciliace pro frakční instrumenty;
@@ -892,6 +931,18 @@ Nejde o změny produktového směru, ale o technická rozhodnutí, která vyžad
 - [OpenAI: Apps in ChatGPT](https://help.openai.com/en/articles/11487775-connectors-in-chatgpt)
 - [OpenAI: developer mode and MCP apps](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)
 - [OpenAI Apps SDK](https://developers.openai.com/apps-sdk)
+
+### Vercel a cloud infrastruktura
+
+- [Vercel Functions](https://vercel.com/docs/functions)
+- [FastAPI na Vercelu](https://vercel.com/docs/frameworks/backend/fastapi)
+- [Vercel Cron Jobs](https://vercel.com/docs/cron-jobs)
+- [PostgreSQL přes Vercel Marketplace](https://vercel.com/docs/postgres)
+- [Private Vercel Blob](https://vercel.com/docs/vercel-blob/using-blob-sdk)
+- [Vercel Sensitive Environment Variables](https://vercel.com/docs/environment-variables/sensitive-environment-variables)
+- [Vercel OIDC federation](https://vercel.com/docs/oidc)
+- [Vercel OIDC pro AWS](https://vercel.com/docs/oidc/aws)
+- [Vercel regions](https://vercel.com/docs/regions)
 
 ### Tržní a klasifikační data
 
