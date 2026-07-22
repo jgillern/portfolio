@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
+from .archive import EncryptedArchive, VercelBlobWriter
 from .config import ConfigurationError, Settings
 from .crypto import SecretBox
 from .daily import DailyPipeline, DailyPipelineError, build_daily_steps
@@ -33,6 +34,14 @@ def _settings() -> Settings:
 
 def _repository() -> WorkerRepository:
     return WorkerRepository(_settings().require("database_write_url"))
+
+
+def _archive() -> EncryptedArchive:
+    settings = _settings()
+    return EncryptedArchive(
+        box=SecretBox(settings.require("master_encryption_key")),
+        writer=VercelBlobWriter(token=settings.require("blob_token")),
+    )
 
 
 def _verify_cron(authorization: str | None) -> None:
@@ -150,7 +159,7 @@ async def import_document(
         signature=x_portfolio_signature,
     )
     try:
-        result = ImportService(_repository()).import_payload(
+        result = ImportService(_repository(), archive=_archive()).import_payload(
             broker_code=broker_code,
             account_ref=account_ref,
             payload=payload,

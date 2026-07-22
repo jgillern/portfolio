@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from .archive import EncryptedArchive
 from .fingerprint import source_fingerprint
 from .parsers import PatriaHtmlParser, XtbCsvParser
 from .parsers.base import ParseError
@@ -18,8 +19,14 @@ class ImportResult:
 
 
 class ImportService:
-    def __init__(self, repository: WorkerRepository) -> None:
+    def __init__(
+        self,
+        repository: WorkerRepository,
+        *,
+        archive: EncryptedArchive | None = None,
+    ) -> None:
         self._repository = repository
+        self._archive = archive
 
     def import_payload(
         self,
@@ -48,13 +55,26 @@ class ImportService:
         else:
             raise ParseError("unsupported broker document type")
 
+        fingerprint = source_fingerprint(payload)
+        encrypted_blob_key = None
+        if self._archive is not None:
+            pathname = (
+                f"raw/{broker.lower()}/{received:%Y/%m}/"
+                f"{fingerprint}.enc"
+            )
+            encrypted_blob_key = self._archive.store_raw(
+                pathname=pathname,
+                payload=payload,
+            ).pathname
+
         account_id = self._repository.resolve_account(broker, account_ref)
         import_id, created = self._repository.register_import(
             broker_code=broker,
             account_id=account_id,
             source_channel=source_channel,
             document_type=document_type,
-            source_fingerprint=source_fingerprint(payload),
+            source_fingerprint=fingerprint,
+            encrypted_blob_key=encrypted_blob_key,
             parser_version=parser.version,
             received_at=received,
             gmail_message_id=gmail_message_id,

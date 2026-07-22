@@ -55,6 +55,7 @@ class WorkerRepository:
         received_at: datetime,
         gmail_message_id: str | None = None,
         mime_part_id: str | None = None,
+        encrypted_blob_key: str | None = None,
     ) -> tuple[UUID, bool]:
         with self.connection() as connection:
             row = connection.execute(
@@ -62,10 +63,10 @@ class WorkerRepository:
                 INSERT INTO raw_import (
                   broker_id, account_id, source_channel, document_type,
                   gmail_message_id, mime_part_id, source_fingerprint,
-                  parser_version, received_at
+                  encrypted_blob_key, parser_version, received_at
                 )
                 SELECT
-                  b.id, %s, %s, %s, %s, %s, %s, %s, %s
+                  b.id, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 FROM broker b
                 WHERE b.code = %s
                 ON CONFLICT (source_fingerprint) DO NOTHING
@@ -78,6 +79,7 @@ class WorkerRepository:
                     gmail_message_id,
                     mime_part_id,
                     source_fingerprint,
+                    encrypted_blob_key,
                     parser_version,
                     received_at,
                     broker_code,
