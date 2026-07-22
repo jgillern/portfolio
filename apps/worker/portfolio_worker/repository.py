@@ -1708,7 +1708,9 @@ class WorkerRepository:
             "cash_leg",
             "lot",
             "lot_allocation",
+            "job_run",
             "encrypted_secret",
+            "secret_access_audit",
             "price",
             "fx_rate",
             "position_snapshot",
@@ -1718,6 +1720,8 @@ class WorkerRepository:
             "benchmark",
             "benchmark_series",
             "connector_state",
+            "reconciliation_run",
+            "reconciliation_item",
             "data_quality_issue",
         )
         exported: dict[str, list[dict[str, Any]]] = {}

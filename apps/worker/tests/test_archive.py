@@ -27,3 +27,27 @@ def test_raw_archive_is_encrypted_before_writer_receives_it() -> None:
         box.decrypt_blob(writer.payload, object_key="raw/synthetic.bin")
         == b"plain synthetic data"
     )
+
+
+def test_encrypted_backup_round_trip_is_restore_verifiable() -> None:
+    writer = MemoryWriter()
+    box = SecretBox(base64.b64encode(bytes(range(32))).decode())
+    archive = EncryptedArchive(box=box, writer=writer)
+    pathname = "backups/daily/slot-1.json.gz.enc"
+    tables = {
+        "account": [
+            {
+                "id": "00000000-0000-4000-8000-000000000001",
+                "pseudonym": "synthetic",
+            }
+        ],
+        "ledger_event": [],
+    }
+
+    archive.store_backup(pathname=pathname, tables=tables)
+
+    assert writer.payload is not None
+    assert archive.decode_backup(
+        pathname=pathname,
+        payload=writer.payload,
+    ) == tables

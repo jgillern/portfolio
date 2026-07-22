@@ -82,3 +82,20 @@ class EncryptedArchive:
         compressed = gzip.compress(serialized, compresslevel=9, mtime=0)
         encrypted = self._box.encrypt_blob(compressed, object_key=pathname)
         return self._writer.put(pathname, encrypted)
+
+    def decode_backup(
+        self,
+        *,
+        pathname: str,
+        payload: bytes,
+    ) -> dict[str, list[dict[str, Any]]]:
+        compressed = self._box.decrypt_blob(payload, object_key=pathname)
+        decoded = json.loads(gzip.decompress(compressed))
+        if not isinstance(decoded, dict):
+            raise ValueError("backup root must be an object")
+        for table_name, rows in decoded.items():
+            if not isinstance(table_name, str) or not isinstance(rows, list):
+                raise ValueError("backup table payload is malformed")
+            if not all(isinstance(row, dict) for row in rows):
+                raise ValueError("backup rows must be objects")
+        return decoded
