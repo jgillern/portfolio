@@ -48,5 +48,6 @@ class Settings:
             "master_encryption_key",
             "worker_signing_key",
             "cron_secret",
+            "blob_token",
         ):
             self.require(name)

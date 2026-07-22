@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from .config import ConfigurationError, Settings
 from .crypto import SecretBox
+from .daily import DailyPipeline, DailyPipelineError, build_daily_steps
 from .import_service import ImportService
 from .repository import RepositoryError, WorkerRepository
 from .security import InvalidSignature, content_hash, verify_request
@@ -71,15 +72,59 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "portfolio-worker"}
 
 
+def _run_daily(*, idempotency_key: str) -> dict[str, str | bool]:
+    repository = _repository()
+    run_date = datetime.now(UTC).date()
+    try:
+        job_id, created = repository.start_job("DAILY", idempotency_key)
+    except RepositoryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not created:
+        return {"job_id": str(job_id), "started": False, "status": "duplicate"}
+    try:
+        result = DailyPipeline(
+            repository,
+            run_date=run_date,
+            steps=build_daily_steps(
+                repository,
+                _settings(),
+                run_date=run_date,
+            ),
+        ).run(job_id)
+    except DailyPipelineError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {
+        "job_id": str(job_id),
+        "started": True,
+        "status": result.status.lower(),
+    }
+
+
 @app.get("/api/cron/daily")
 def daily_cron(authorization: str | None = Header(default=None)) -> dict[str, str | bool]:
     _verify_cron(authorization)
     key = datetime.now(UTC).date().isoformat()
-    try:
-        job_id, created = _repository().start_job("DAILY", f"daily:{key}")
-    except RepositoryError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"job_id": str(job_id), "started": created}
+    return _run_daily(idempotency_key=f"daily:{key}")
+
+
+@app.post("/api/sync")
+async def manual_sync(
+    request: Request,
+    x_portfolio_timestamp: str | None = Header(default=None),
+    x_portfolio_signature: str | None = Header(default=None),
+    x_portfolio_idempotency_key: str | None = Header(default=None),
+) -> dict[str, str | bool]:
+    body = await request.body()
+    _verify_signed_request(
+        request,
+        body_hash=hashlib.sha256(body).hexdigest(),
+        timestamp=x_portfolio_timestamp,
+        signature=x_portfolio_signature,
+    )
+    key = x_portfolio_idempotency_key or x_portfolio_timestamp
+    if not key or len(key) > 128:
+        raise HTTPException(status_code=400, detail="invalid idempotency key")
+    return _run_daily(idempotency_key=f"manual:{key}")
 
 
 @app.post("/api/import")
