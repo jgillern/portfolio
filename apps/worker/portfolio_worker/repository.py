@@ -16,6 +16,7 @@ from .crypto import SecretEnvelope
 from .fingerprint import economic_fingerprint, sha256_json
 from .lots import InsufficientPosition, OpenLot, allocate_fifo
 from .models import EventType, NormalizedEvent
+from .performance import xirr
 
 
 class RepositoryError(RuntimeError):
@@ -701,12 +702,94 @@ class WorkerRepository:
                     reporting_currency,
                 ),
             )
+            self._update_position_cost_basis(
+                connection,
+                snapshot_date=snapshot_date,
+                reporting_currency=reporting_currency,
+            )
             self._rebuild_portfolio_snapshots(
                 connection,
                 snapshot_date=snapshot_date,
                 reporting_currency=reporting_currency,
             )
             return result.rowcount
+
+    def _update_position_cost_basis(
+        self,
+        connection: Connection[Any],
+        *,
+        snapshot_date: date,
+        reporting_currency: str,
+    ) -> None:
+        connection.execute(
+            """
+            WITH bases AS (
+              SELECT
+                l.account_id,
+                l.instrument_id,
+                sum(
+                  l.acquisition_cost
+                  * l.remaining_quantity
+                  / l.original_quantity
+                  * portfolio_fx_factor(l.cost_currency, %s, %s)
+                ) AS cost_basis,
+                bool_or(
+                  portfolio_fx_factor(l.cost_currency, %s, %s) IS NULL
+                ) AS missing_fx
+              FROM lot l
+              WHERE l.remaining_quantity > 0
+              GROUP BY l.account_id, l.instrument_id
+            )
+            UPDATE position_snapshot ps
+            SET cost_basis = bases.cost_basis,
+                unrealized_result = CASE
+                  WHEN ps.market_value IS NULL
+                    OR bases.cost_basis IS NULL
+                    OR bases.missing_fx
+                    THEN NULL
+                  ELSE ps.market_value - bases.cost_basis
+                END,
+                quality = CASE
+                  WHEN bases.missing_fx THEN 'MISSING'::data_quality
+                  ELSE ps.quality
+                END
+            FROM bases
+            WHERE ps.snapshot_date = %s
+              AND ps.reporting_currency = %s
+              AND ps.account_id = bases.account_id
+              AND ps.instrument_id = bases.instrument_id
+            """,
+            (
+                reporting_currency,
+                snapshot_date,
+                reporting_currency,
+                snapshot_date,
+                snapshot_date,
+                reporting_currency,
+            ),
+        )
+        connection.execute(
+            """
+            UPDATE position_snapshot ps
+            SET cost_basis = NULL,
+                unrealized_result = NULL,
+                quality = CASE
+                  WHEN ps.quality = 'VERIFIED' THEN 'PARTIAL'::data_quality
+                  ELSE ps.quality
+                END
+            WHERE ps.snapshot_date = %s
+              AND ps.reporting_currency = %s
+              AND ps.quantity > 0
+              AND NOT EXISTS (
+                SELECT 1
+                FROM lot l
+                WHERE l.account_id = ps.account_id
+                  AND l.instrument_id = ps.instrument_id
+                  AND l.remaining_quantity > 0
+              )
+            """,
+            (snapshot_date, reporting_currency),
+        )
 
     def _rebuild_portfolio_snapshots(
         self,
@@ -719,21 +802,27 @@ class WorkerRepository:
             """
             WITH aggregates AS (
               SELECT
-                ps.account_id,
+                a.id AS account_id,
                 a.tax_wrapper,
-                sum(ps.market_value) AS market_value,
-                bool_or(ps.quality = 'MISSING') AS has_missing,
-                bool_or(ps.quality IN ('STALE', 'PARTIAL')) AS has_partial,
+                coalesce(sum(ps.market_value), 0) AS market_value,
+                coalesce(bool_or(ps.quality = 'MISSING'), false) AS has_missing,
+                coalesce(
+                  bool_or(ps.quality IN ('STALE', 'PARTIAL')),
+                  false
+                ) AS has_partial,
                 max(coalesce(pr.retrieved_at, ps.created_at)) AS price_as_of,
                 max(coalesce(fx.retrieved_at, pr.retrieved_at, ps.created_at))
                   AS fx_as_of
-              FROM position_snapshot ps
-              JOIN account a ON a.id = ps.account_id
+              FROM account a
+              LEFT JOIN position_snapshot ps
+                ON ps.account_id = a.id
+               AND ps.snapshot_date = %s
+               AND ps.reporting_currency = %s
               LEFT JOIN price pr ON pr.id = ps.price_id
               LEFT JOIN fx_rate fx ON fx.id = ps.fx_rate_id
-              WHERE ps.snapshot_date = %s
-                AND ps.reporting_currency = %s
-              GROUP BY ps.account_id, a.tax_wrapper
+              WHERE (a.active_from IS NULL OR a.active_from <= %s)
+                AND (a.active_to IS NULL OR a.active_to >= %s)
+              GROUP BY a.id, a.tax_wrapper
             ),
             scopes AS (
               SELECT
@@ -802,8 +891,15 @@ class WorkerRepository:
                 snapshot_date,
                 reporting_currency,
                 snapshot_date,
+                snapshot_date,
+                snapshot_date,
                 reporting_currency,
             ),
+        )
+        self._update_portfolio_cash_and_metrics(
+            connection,
+            snapshot_date=snapshot_date,
+            reporting_currency=reporting_currency,
         )
         connection.execute(
             """
@@ -856,6 +952,269 @@ class WorkerRepository:
             """,
             (snapshot_date, reporting_currency),
         )
+
+    def _update_portfolio_cash_and_metrics(
+        self,
+        connection: Connection[Any],
+        *,
+        snapshot_date: date,
+        reporting_currency: str,
+    ) -> None:
+        connection.execute(
+            """
+            UPDATE portfolio_snapshot current
+            SET market_value = current.market_value + coalesce(
+                  (
+                    SELECT sum(
+                      cl.amount * portfolio_fx_factor(
+                        cl.currency,
+                        current.reporting_currency,
+                        current.snapshot_date
+                      )
+                    )
+                    FROM cash_leg cl
+                    JOIN ledger_event le ON le.id = cl.ledger_event_id
+                    JOIN account a ON a.id = le.account_id
+                    WHERE le.occurred_at::date <= current.snapshot_date
+                      AND (
+                        current.account_id IS NULL
+                        OR le.account_id = current.account_id
+                      )
+                      AND (
+                        current.tax_wrapper IS NULL
+                        OR a.tax_wrapper = current.tax_wrapper
+                      )
+                  ),
+                  0
+                ),
+                net_external_flow = coalesce(
+                  (
+                    SELECT sum(
+                      CASE
+                        WHEN le.event_type IN ('DEPOSIT', 'TRANSFER_IN')
+                          THEN abs(cl.amount)
+                        WHEN le.event_type IN ('WITHDRAWAL', 'TRANSFER_OUT')
+                          THEN -abs(cl.amount)
+                        ELSE cl.amount
+                      END
+                      * portfolio_fx_factor(
+                          cl.currency,
+                          current.reporting_currency,
+                          current.snapshot_date
+                        )
+                    )
+                    FROM cash_leg cl
+                    JOIN ledger_event le ON le.id = cl.ledger_event_id
+                    JOIN account a ON a.id = le.account_id
+                    WHERE le.external_cash_flow
+                      AND cl.leg_type IN ('PRINCIPAL', 'OTHER')
+                      AND le.occurred_at::date = current.snapshot_date
+                      AND (
+                        current.account_id IS NULL
+                        OR le.account_id = current.account_id
+                      )
+                      AND (
+                        current.tax_wrapper IS NULL
+                        OR a.tax_wrapper = current.tax_wrapper
+                      )
+                  ),
+                  0
+                ),
+                unrealized_result = (
+                  SELECT sum(ps.unrealized_result)
+                  FROM position_snapshot ps
+                  JOIN account a ON a.id = ps.account_id
+                  WHERE ps.snapshot_date = current.snapshot_date
+                    AND ps.reporting_currency = current.reporting_currency
+                    AND (
+                      current.account_id IS NULL
+                      OR ps.account_id = current.account_id
+                    )
+                    AND (
+                      current.tax_wrapper IS NULL
+                      OR a.tax_wrapper = current.tax_wrapper
+                    )
+                ),
+                income = coalesce(
+                  (
+                    SELECT sum(
+                      cl.amount * portfolio_fx_factor(
+                        cl.currency,
+                        current.reporting_currency,
+                        le.occurred_at::date
+                      )
+                    )
+                    FROM cash_leg cl
+                    JOIN ledger_event le ON le.id = cl.ledger_event_id
+                    JOIN account a ON a.id = le.account_id
+                    WHERE cl.leg_type IN ('INCOME_GROSS', 'INCOME_NET')
+                      AND le.occurred_at::date <= current.snapshot_date
+                      AND (
+                        current.account_id IS NULL
+                        OR le.account_id = current.account_id
+                      )
+                      AND (
+                        current.tax_wrapper IS NULL
+                        OR a.tax_wrapper = current.tax_wrapper
+                      )
+                  ),
+                  0
+                ),
+                fees = coalesce(
+                  (
+                    SELECT sum(
+                      abs(cl.amount) * portfolio_fx_factor(
+                        cl.currency,
+                        current.reporting_currency,
+                        le.occurred_at::date
+                      )
+                    )
+                    FROM cash_leg cl
+                    JOIN ledger_event le ON le.id = cl.ledger_event_id
+                    JOIN account a ON a.id = le.account_id
+                    WHERE cl.leg_type = 'FEE'
+                      AND le.occurred_at::date <= current.snapshot_date
+                      AND (
+                        current.account_id IS NULL
+                        OR le.account_id = current.account_id
+                      )
+                      AND (
+                        current.tax_wrapper IS NULL
+                        OR a.tax_wrapper = current.tax_wrapper
+                      )
+                  ),
+                  0
+                ),
+                taxes = coalesce(
+                  (
+                    SELECT sum(
+                      abs(cl.amount) * portfolio_fx_factor(
+                        cl.currency,
+                        current.reporting_currency,
+                        le.occurred_at::date
+                      )
+                    )
+                    FROM cash_leg cl
+                    JOIN ledger_event le ON le.id = cl.ledger_event_id
+                    JOIN account a ON a.id = le.account_id
+                    WHERE cl.leg_type = 'TAX'
+                      AND le.occurred_at::date <= current.snapshot_date
+                      AND (
+                        current.account_id IS NULL
+                        OR le.account_id = current.account_id
+                      )
+                      AND (
+                        current.tax_wrapper IS NULL
+                        OR a.tax_wrapper = current.tax_wrapper
+                      )
+                  ),
+                  0
+                ),
+                realized_result = coalesce(
+                  (
+                    SELECT sum(
+                      event_cash.cash_result
+                      - coalesce(event_cost.allocated_cost, 0)
+                    )
+                    FROM ledger_event le
+                    JOIN account a ON a.id = le.account_id
+                    JOIN LATERAL (
+                      SELECT sum(
+                        cl.amount * portfolio_fx_factor(
+                          cl.currency,
+                          current.reporting_currency,
+                          le.occurred_at::date
+                        )
+                      ) AS cash_result
+                      FROM cash_leg cl
+                      WHERE cl.ledger_event_id = le.id
+                        AND cl.leg_type IN ('PRINCIPAL', 'FEE', 'TAX')
+                    ) event_cash ON true
+                    LEFT JOIN LATERAL (
+                      SELECT sum(
+                        la.allocated_cost * portfolio_fx_factor(
+                          l.cost_currency,
+                          current.reporting_currency,
+                          le.occurred_at::date
+                        )
+                      ) AS allocated_cost
+                      FROM lot_allocation la
+                      JOIN lot l ON l.id = la.lot_id
+                      WHERE la.closing_event_id = le.id
+                    ) event_cost ON true
+                    WHERE le.event_type = 'SELL'
+                      AND le.occurred_at::date <= current.snapshot_date
+                      AND (
+                        current.account_id IS NULL
+                        OR le.account_id = current.account_id
+                      )
+                      AND (
+                        current.tax_wrapper IS NULL
+                        OR a.tax_wrapper = current.tax_wrapper
+                      )
+                  ),
+                  0
+                )
+            WHERE current.snapshot_date = %s
+              AND current.reporting_currency = %s
+            """,
+            (snapshot_date, reporting_currency),
+        )
+        rows = connection.execute(
+            """
+            SELECT id, account_id, tax_wrapper, market_value
+            FROM portfolio_snapshot
+            WHERE snapshot_date = %s
+              AND reporting_currency = %s
+            """,
+            (snapshot_date, reporting_currency),
+        ).fetchall()
+        for snapshot_id, account_id, tax_wrapper, market_value in rows:
+            flows = connection.execute(
+                """
+                SELECT
+                  le.occurred_at::date,
+                  sum(
+                    CASE
+                      WHEN le.event_type IN ('DEPOSIT', 'TRANSFER_IN')
+                        THEN -abs(cl.amount)
+                      WHEN le.event_type IN ('WITHDRAWAL', 'TRANSFER_OUT')
+                        THEN abs(cl.amount)
+                      ELSE -cl.amount
+                    END
+                    * portfolio_fx_factor(cl.currency, %s, le.occurred_at::date)
+                  )
+                FROM ledger_event le
+                JOIN cash_leg cl ON cl.ledger_event_id = le.id
+                JOIN account a ON a.id = le.account_id
+                WHERE le.external_cash_flow
+                  AND cl.leg_type IN ('PRINCIPAL', 'OTHER')
+                  AND le.occurred_at::date <= %s
+                  AND (%s::uuid IS NULL OR le.account_id = %s::uuid)
+                  AND (%s::tax_wrapper IS NULL OR a.tax_wrapper = %s::tax_wrapper)
+                GROUP BY le.occurred_at::date
+                ORDER BY le.occurred_at::date
+                """,
+                (
+                    reporting_currency,
+                    snapshot_date,
+                    account_id,
+                    account_id,
+                    tax_wrapper,
+                    tax_wrapper,
+                ),
+            ).fetchall()
+            cash_flows = [
+                (flow_date, Decimal(flow_amount))
+                for flow_date, flow_amount in flows
+                if flow_amount is not None and flow_amount != 0
+            ]
+            if market_value != 0:
+                cash_flows.append((snapshot_date, Decimal(market_value)))
+            connection.execute(
+                "UPDATE portfolio_snapshot SET xirr = %s WHERE id = %s",
+                (xirr(cash_flows), snapshot_id),
+            )
 
     def refresh_data_quality_issues(self, snapshot_date: date) -> int:
         with self.connection() as connection:
