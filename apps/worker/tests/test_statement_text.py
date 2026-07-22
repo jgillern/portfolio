@@ -1,10 +1,7 @@
 from decimal import Decimal
 
 from portfolio_worker.models import EventType, ExecutionLegType
-from portfolio_worker.parsers.statement_text import (
-    GeorgePdfParser,
-    XtbPdfParser,
-)
+from portfolio_worker.parsers.statement_text import GeorgePdfParser, XtbPdfParser
 
 
 HEADER = (

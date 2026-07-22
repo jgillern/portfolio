@@ -1,18 +1,13 @@
 from __future__ import annotations
 
 import os
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import psycopg
 import pytest
 
-from portfolio_worker.models import (
-    CashLeg,
-    CashLegType,
-    EventType,
-    NormalizedEvent,
-)
+from portfolio_worker.models import CashLeg, CashLegType, EventType, NormalizedEvent
 from portfolio_worker.repository import WorkerRepository
 
 
