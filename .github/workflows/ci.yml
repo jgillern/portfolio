@@ -87,4 +87,4 @@ jobs:
       - name: Verify worker role can write
         run: |
           psql "$PGURL" -v ON_ERROR_STOP=1 \
-            -c "SET ROLE portfolio_worker; INSERT INTO connector_state (connector) VALUES ('TEST_CONNECTOR'); DELETE FROM connector_state WHERE connector = 'TEST_CONNECTOR';"
+            -c "SET ROLE portfolio_worker; UPDATE connector_state SET checkpoint = '{\"ci\": true}'::jsonb WHERE connector = 'CNB_FX';"
