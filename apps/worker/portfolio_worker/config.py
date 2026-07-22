@@ -47,6 +47,10 @@ class Settings:
     def validate_production(self) -> None:
         if self.app_env != "production":
             return
+        if self.app_base_url and not self.app_base_url.startswith("https://"):
+            raise ConfigurationError("APP_BASE_URL must use HTTPS in production")
+        if self.gmail_redirect_uri and not self.gmail_redirect_uri.startswith("https://"):
+            raise ConfigurationError("GMAIL_REDIRECT_URI must use HTTPS in production")
         for name in (
             "database_write_url",
             "master_encryption_key",

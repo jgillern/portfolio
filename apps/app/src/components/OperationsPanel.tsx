@@ -19,6 +19,25 @@ export function OperationsPanel({
   const [busy, setBusy] = useState(false);
   const xtbAccounts = accounts.filter((account) => brokerCode(account.broker) === "XTB");
 
+  async function connectGmail(): Promise<void> {
+    setBusy(true);
+    setMessage("");
+    const response = await fetch("/api/actions/gmail-oauth", { method: "POST" });
+    if (!response.ok) {
+      setMessage("Gmail OAuth se nepodařilo zahájit.");
+      setBusy(false);
+      return;
+    }
+    const payload = await response.json();
+    const url = payload?.data?.authorization_url;
+    if (typeof url !== "string") {
+      setMessage("Worker nevrátil bezpečnou OAuth adresu.");
+      setBusy(false);
+      return;
+    }
+    window.location.assign(url);
+  }
+
   async function sync(): Promise<void> {
     setBusy(true);
     setMessage("");
@@ -66,6 +85,13 @@ export function OperationsPanel({
 
   return (
     <section className="operations-grid" aria-label="Privilegované operace">
+      <article className="panel operation-card">
+        <p className="eyebrow">Gmail read-only OAuth</p>
+        <h2>Připojit importní schránku</h2>
+        <p>Token se po callbacku zašifruje ve workeru a nikdy se nevrací do aplikace.</p>
+        <button disabled={busy} onClick={connectGmail} type="button">Připojit Gmail</button>
+      </article>
+
       <article className="panel operation-card">
         <p className="eyebrow">Idempotentní job</p>
         <h2>Synchronizovat nyní</h2>

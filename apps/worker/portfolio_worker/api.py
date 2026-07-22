@@ -7,12 +7,14 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from .archive import EncryptedArchive, VercelBlobWriter
 from .config import ConfigurationError, Settings
 from .crypto import InvalidSecret, SecretBox
 from .daily import DailyPipeline, DailyPipelineError, build_daily_steps
+from .gmail_oauth import GmailOauth, InvalidOauthState
 from .import_service import ImportService
 from .repository import RepositoryError, WorkerRepository
 from .security import InvalidSignature, content_hash, verify_request
@@ -237,3 +239,70 @@ async def store_secret(
         key_version=envelope.key_version,
     )
     return {"secret_id": str(secret_id)}
+
+
+def _gmail_oauth() -> GmailOauth:
+    settings = _settings()
+    return GmailOauth(
+        client_id=settings.require("gmail_client_id"),
+        client_secret=settings.require("gmail_client_secret"),
+        redirect_uri=settings.require("gmail_redirect_uri"),
+        state_key=settings.require("worker_signing_key"),
+    )
+
+
+@app.post("/api/oauth/gmail/start")
+async def gmail_oauth_start(
+    request: Request,
+    x_portfolio_timestamp: str | None = Header(default=None),
+    x_portfolio_signature: str | None = Header(default=None),
+) -> dict[str, str]:
+    body = await request.body()
+    _verify_signed_request(
+        request,
+        body_hash=hashlib.sha256(body).hexdigest(),
+        timestamp=x_portfolio_timestamp,
+        signature=x_portfolio_signature,
+    )
+    oauth = _gmail_oauth()
+    state = oauth.create_state()
+    return {"authorization_url": oauth.authorization_url(state)}
+
+
+@app.get("/api/oauth/gmail/callback")
+def gmail_oauth_callback(
+    code: str,
+    state: str,
+) -> RedirectResponse:
+    oauth = _gmail_oauth()
+    try:
+        oauth.verify_state(state)
+        tokens = oauth.exchange_code(code)
+    except (InvalidOauthState, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="GMAIL_OAUTH_FAILED",
+        ) from exc
+    settings = _settings()
+    envelope = SecretBox(
+        settings.require("master_encryption_key")
+    ).encrypt_secret(
+        tokens.refresh_token.encode(),
+        account_id=None,
+        secret_type="GMAIL_REFRESH_TOKEN",
+        key_version=1,
+    )
+    _repository().store_secret(
+        account_id=None,
+        secret_type="GMAIL_REFRESH_TOKEN",
+        ciphertext=envelope.ciphertext,
+        nonce=envelope.nonce,
+        auth_tag=envelope.auth_tag,
+        aad_hash=envelope.aad_hash,
+        key_version=envelope.key_version,
+    )
+    target = settings.require("app_base_url").rstrip("/")
+    return RedirectResponse(
+        url=target + "/sources?gmail=connected",
+        status_code=303,
+    )

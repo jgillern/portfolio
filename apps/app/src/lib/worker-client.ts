@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 
 type WorkerCall = {
-  path: "/api/sync" | "/api/import" | "/api/secrets";
+  path: "/api/sync" | "/api/import" | "/api/secrets" | "/api/oauth/gmail/start";
   body: BodyInit | null;
   contentHashPayload: Uint8Array;
   contentType?: string;
