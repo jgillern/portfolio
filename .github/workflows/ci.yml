@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: 24.18.0
       - run: corepack enable
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
@@ -43,7 +43,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync --all-groups
+      - run: uv sync --frozen --all-groups
       - run: uv run ruff check . --fix --diff
       - run: uv run pytest --cov=portfolio_worker --cov-report=term-missing
 
@@ -82,7 +82,7 @@ jobs:
       - name: Run repository integration test
         working-directory: apps/worker
         run: |
-          uv sync --all-groups
+          uv sync --frozen --all-groups
           uv run pytest tests/test_repository_integration.py
       - name: Verify read role can use safe views
         run: |
