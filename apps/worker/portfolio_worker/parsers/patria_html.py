@@ -38,7 +38,7 @@ class PatriaHtmlParser:
         return tuple(events)
 
     def _parse_row(self, row: dict[str, str], account_ref: str) -> NormalizedEvent:
-        side = (row.get("smer") or row.get("side") or "").lower()
+        side = normalized_header(row.get("smer") or row.get("side") or "")
         is_buy = side in {"nakup", "buy", "n"}
         is_sell = side in {"prodej", "sell", "p"}
         if not (is_buy or is_sell):

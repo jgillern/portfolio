@@ -2,5 +2,5 @@ packages:
   - apps/app
   - packages/*
 
-onlyBuiltDependencies:
-  - sharp
+allowBuilds:
+  sharp: true
