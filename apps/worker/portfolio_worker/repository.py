@@ -11,6 +11,7 @@ from psycopg import Connection, sql
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from .crypto import SecretEnvelope
 from .fingerprint import economic_fingerprint, sha256_json
 from .models import NormalizedEvent
 
@@ -843,3 +844,52 @@ class WorkerRepository:
                     )
                     exported[table_name] = [dict(row) for row in cursor.fetchall()]
         return exported
+
+    def load_active_secret(
+        self,
+        *,
+        account_id: UUID | None,
+        secret_type: str,
+    ) -> tuple[UUID, SecretEnvelope]:
+        with self.connection() as connection:
+            row = connection.execute(
+                """
+                SELECT id, ciphertext, nonce, auth_tag, aad_hash, key_version
+                FROM encrypted_secret
+                WHERE account_id IS NOT DISTINCT FROM %s
+                  AND secret_type = %s
+                  AND superseded_at IS NULL
+                """,
+                (account_id, secret_type),
+            ).fetchone()
+        if row is None:
+            raise RepositoryError("required encrypted secret is not configured")
+        return (
+            row[0],
+            SecretEnvelope(
+                ciphertext=row[1],
+                nonce=row[2],
+                auth_tag=row[3],
+                aad_hash=row[4],
+                key_version=row[5],
+            ),
+        )
+
+    def audit_secret_access(
+        self,
+        secret_id: UUID,
+        *,
+        outcome: str,
+    ) -> None:
+        if outcome not in {"SUCCESS", "DENIED", "FAILED"}:
+            raise ValueError("invalid secret audit outcome")
+        with self.connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO secret_access_audit (
+                  encrypted_secret_id, action, outcome
+                )
+                VALUES (%s, 'DECRYPT', %s)
+                """,
+                (secret_id, outcome),
+            )

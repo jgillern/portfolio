@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from .archive import EncryptedArchive, VercelBlobWriter
 from .config import ConfigurationError, Settings
-from .crypto import SecretBox
+from .crypto import InvalidSecret, SecretBox
 from .daily import DailyPipeline, DailyPipelineError, build_daily_steps
 from .import_service import ImportService
 from .repository import RepositoryError, WorkerRepository
@@ -158,12 +158,36 @@ async def import_document(
         timestamp=x_portfolio_timestamp,
         signature=x_portfolio_signature,
     )
+    repository = _repository()
+    pdf_password = None
+    if broker_code.upper() == "XTB" and document.content_type == "application/pdf":
+        account_id = repository.resolve_account("XTB", account_ref)
+        secret_id, envelope = repository.load_active_secret(
+            account_id=account_id,
+            secret_type="XTB_PDF_PASSWORD",
+        )
+        try:
+            pdf_password = SecretBox(
+                _settings().require("master_encryption_key")
+            ).decrypt_secret(
+                envelope,
+                account_id=account_id,
+                secret_type="XTB_PDF_PASSWORD",
+            ).decode()
+        except (InvalidSecret, UnicodeDecodeError) as exc:
+            repository.audit_secret_access(secret_id, outcome="FAILED")
+            raise HTTPException(
+                status_code=422,
+                detail="PASSWORD_INVALID",
+            ) from exc
+        repository.audit_secret_access(secret_id, outcome="SUCCESS")
     try:
-        result = ImportService(_repository(), archive=_archive()).import_payload(
+        result = ImportService(repository, archive=_archive()).import_payload(
             broker_code=broker_code,
             account_ref=account_ref,
             payload=payload,
             content_type=document.content_type or "application/octet-stream",
+            pdf_password=pdf_password,
         )
     except (ValueError, RepositoryError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
