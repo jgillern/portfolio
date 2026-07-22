@@ -10,7 +10,6 @@ import pytest
 from portfolio_worker.models import CashLeg, CashLegType, EventType, NormalizedEvent
 from portfolio_worker.repository import WorkerRepository
 
-
 pytestmark = pytest.mark.skipif(
     not os.environ.get("PGURL"),
     reason="PostgreSQL integration URL is not configured",

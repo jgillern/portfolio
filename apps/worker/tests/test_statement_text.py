@@ -3,7 +3,6 @@ from decimal import Decimal
 from portfolio_worker.models import EventType, ExecutionLegType
 from portfolio_worker.parsers.statement_text import GeorgePdfParser, XtbPdfParser
 
-
 HEADER = (
     "Order ID|Occurred At|Event Type|Name|ISIN|Ticker|Quantity|"
     "Price|Gross|Currency|Leg Type|Fee|Tax"

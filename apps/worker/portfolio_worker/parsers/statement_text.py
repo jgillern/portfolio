@@ -19,7 +19,6 @@ from portfolio_worker.parsers.base import (
     parse_decimal,
 )
 
-
 _EVENT_ALIASES = {
     "buy": EventType.BUY,
     "nakup": EventType.BUY,
