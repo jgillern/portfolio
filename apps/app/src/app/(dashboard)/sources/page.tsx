@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { OperationsPanel } from "@/components/OperationsPanel";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { formatDateTime } from "@/lib/format";
@@ -23,6 +24,7 @@ export default async function SourcesPage(): Promise<React.ReactNode> {
         description="Čerstvost, duplicity a chyby jsou viditelné; automatizace nikdy neskrývá neúplnost."
         aside={<div className="headline-number"><span>Chyb celkem</span><strong>{errors}</strong></div>}
       />
+      <OperationsPanel accounts={accounts} />
       <section className="source-grid">
         {sources.map((source) => (
           <article className="panel source-card" key={source.connector}>

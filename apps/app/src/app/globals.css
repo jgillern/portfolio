@@ -1406,3 +1406,70 @@ td small {
     padding: 34px 24px;
   }
 }
+
+
+.operations-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.operation-card h2 {
+  margin: 0;
+  font-family: Georgia, serif;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.operation-card > p:not(.eyebrow) {
+  min-height: 32px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.operation-card form {
+  display: grid;
+  gap: 8px;
+}
+
+.operation-card select,
+.operation-card input,
+.operation-card button,
+.operation-card > button {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  font-size: 10px;
+}
+
+.operation-card button,
+.operation-card > button {
+  border-color: var(--forest);
+  color: white;
+  background: var(--forest);
+  font-weight: 750;
+}
+
+.operation-card button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.operation-message {
+  grid-column: 1 / -1;
+  min-height: 1em;
+  margin: -5px 3px 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+@media (max-width: 900px) {
+  .operations-grid {
+    grid-template-columns: 1fr;
+  }
+}
