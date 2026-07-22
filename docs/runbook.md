@@ -40,6 +40,7 @@ pouze syntetická data a explicitní `ALLOW_PREVIEW_AUTH_BYPASS=true`.
     každého brokera a nakonec historický backfill.
 12. Teprve po úspěšném smoke testu přepnout produkční DNS.
 
+CI i produkční build používají committed `pnpm-lock.yaml` a `apps/worker/uv.lock` ve frozen režimu.
 Úplný seznam názvů proměnných je v `.env.example`. Hodnoty se nikdy neukládají
 do GitHubu ani do proměnných dostupných oběma projektům.
 
