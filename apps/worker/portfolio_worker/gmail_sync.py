@@ -100,7 +100,7 @@ class GmailSync:
                 query=rule.query,
                 after_epoch=after_epoch,
             )
-            rule_imported = rule_duplicates = 0
+            rule_imported = rule_duplicates = rule_errors = 0
             latest_received = None
             for message_id in message_ids:
                 checked += 1
@@ -112,6 +112,7 @@ class GmailSync:
                     )
                 except Exception:
                     errors += 1
+                    rule_errors += 1
                     self._repository.update_connector_state(
                         rule.connector,
                         success=False,
@@ -127,7 +128,7 @@ class GmailSync:
             duplicates += rule_duplicates
             self._repository.update_connector_state(
                 rule.connector,
-                success=True,
+                success=rule_errors == 0,
                 received_at=latest_received,
                 imported=rule_imported,
                 duplicates=rule_duplicates,

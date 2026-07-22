@@ -9,6 +9,7 @@ from uuid import UUID
 from .archive import EncryptedArchive, VercelBlobWriter
 from .config import Settings
 from .crypto import SecretBox
+from .gmail_sync import GmailSync
 from .providers.fx import CnbFxProvider, EcbFxProvider
 
 
@@ -129,6 +130,15 @@ def build_daily_steps(
 ) -> tuple[DailyStep, ...]:
     fx_date = previous_business_day(run_date)
 
+    def sync_gmail() -> dict[str, Any]:
+        result = GmailSync(repository, settings).run()
+        return {
+            "checked_messages": result.checked_messages,
+            "imported_events": result.imported_events,
+            "duplicate_events": result.duplicate_events,
+            "errors": result.errors,
+        }
+
     def refresh_fx() -> dict[str, Any]:
         cnb_quotes = CnbFxProvider().fetch(fx_date)
         cnb_count = repository.upsert_fx_quotes(cnb_quotes)
@@ -199,6 +209,7 @@ def build_daily_steps(
         return details
 
     return (
+        DailyStep("sync_gmail", sync_gmail),
         DailyStep("refresh_fx", refresh_fx),
         DailyStep("rebuild_snapshots", rebuild_snapshots),
         DailyStep("quality_checks", quality_checks),
