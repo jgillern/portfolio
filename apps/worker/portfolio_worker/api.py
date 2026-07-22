@@ -16,6 +16,7 @@ from .crypto import InvalidSecret, SecretBox
 from .daily import DailyPipeline, DailyPipelineError, build_daily_steps
 from .gmail_oauth import GmailOauth, InvalidOauthState
 from .import_service import ImportService
+from .models import SecretKind
 from .repository import RepositoryError, WorkerRepository
 from .security import InvalidSignature, content_hash, verify_request
 
@@ -166,7 +167,7 @@ async def import_document(
         account_id = repository.resolve_account("XTB", account_ref)
         secret_id, envelope = repository.load_active_secret(
             account_id=account_id,
-            secret_type="XTB_PDF_PASSWORD",
+            secret_type=SecretKind.XTB_PDF.value,
         )
         try:
             pdf_password = SecretBox(
@@ -174,7 +175,7 @@ async def import_document(
             ).decrypt_secret(
                 envelope,
                 account_id=account_id,
-                secret_type="XTB_PDF_PASSWORD",
+                secret_type=SecretKind.XTB_PDF.value,
             ).decode()
         except (InvalidSecret, UnicodeDecodeError) as exc:
             repository.audit_secret_access(secret_id, outcome="FAILED")
@@ -289,12 +290,12 @@ def gmail_oauth_callback(
     ).encrypt_secret(
         tokens.refresh_token.encode(),
         account_id=None,
-        secret_type="GMAIL_REFRESH_TOKEN",
+        secret_type=SecretKind.GMAIL_REFRESH.value,
         key_version=1,
     )
     _repository().store_secret(
         account_id=None,
-        secret_type="GMAIL_REFRESH_TOKEN",
+        secret_type=SecretKind.GMAIL_REFRESH.value,
         ciphertext=envelope.ciphertext,
         nonce=envelope.nonce,
         auth_tag=envelope.auth_tag,

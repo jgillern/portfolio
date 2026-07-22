@@ -27,6 +27,11 @@ class EventType(StrEnum):
     ADJUSTMENT_REVERSAL = "ADJUSTMENT_REVERSAL"
 
 
+class SecretKind(StrEnum):
+    GMAIL_REFRESH = "GMAIL_REFRESH_TOKEN"
+    XTB_PDF = "XTB_PDF_PASSWORD"
+
+
 class CashLegType(StrEnum):
     PRINCIPAL = "PRINCIPAL"
     FEE = "FEE"

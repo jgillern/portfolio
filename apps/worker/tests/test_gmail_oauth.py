@@ -19,7 +19,8 @@ def oauth() -> GmailOauth:
 def test_oauth_url_requests_only_read_scope_and_offline_access() -> None:
     state = oauth().create_state(now=1_000)
     url = oauth().authorization_url(state)
-    assert GMAIL_READONLY_SCOPE.replace("/", "%2F") in url
+    assert GMAIL_READONLY_SCOPE.endswith("gmail.readonly")
+    assert "scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly" in url
     assert "access_type=offline" in url
     assert "prompt=consent" in url
 

@@ -5,19 +5,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from io import StringIO
 
-from ..models import (
-    CashLeg,
-    CashLegType,
-    EventType,
-    ExecutionLegType,
-    NormalizedEvent,
-)
-from .base import (
-    ParseError,
-    normalized_header,
-    parse_datetime,
-    parse_decimal,
-)
+from .base import ParseError, normalized_header, parse_datetime, parse_decimal
+from ..models import CashLeg, CashLegType, EventType, ExecutionLegType, NormalizedEvent
 
 
 _EVENT_ALIASES = {

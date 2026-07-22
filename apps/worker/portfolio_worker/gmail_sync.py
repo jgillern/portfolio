@@ -12,6 +12,7 @@ from .config import Settings
 from .crypto import InvalidSecret, SecretBox
 from .gmail import GmailClient, GmailMessage, GmailPart
 from .import_service import ImportService
+from .models import SecretKind
 from .repository import WorkerRepository
 
 
@@ -64,13 +65,13 @@ class GmailSync:
     def run(self) -> GmailSyncResult:
         secret_id, envelope = self._repository.load_active_secret(
             account_id=None,
-            secret_type="GMAIL_REFRESH_TOKEN",
+            secret_type=SecretKind.GMAIL_REFRESH.value,
         )
         try:
             refresh_token = self._box.decrypt_secret(
                 envelope,
                 account_id=None,
-                secret_type="GMAIL_REFRESH_TOKEN",
+                secret_type=SecretKind.GMAIL_REFRESH.value,
             ).decode()
         except (InvalidSecret, UnicodeDecodeError):
             self._repository.audit_secret_access(
@@ -202,13 +203,13 @@ class GmailSync:
         )
         secret_id, envelope = self._repository.load_active_secret(
             account_id=account_id,
-            secret_type="XTB_PDF_PASSWORD",
+            secret_type=SecretKind.XTB_PDF.value,
         )
         try:
             password = self._box.decrypt_secret(
                 envelope,
                 account_id=account_id,
-                secret_type="XTB_PDF_PASSWORD",
+                secret_type=SecretKind.XTB_PDF.value,
             ).decode()
         except (InvalidSecret, UnicodeDecodeError):
             self._repository.audit_secret_access(
