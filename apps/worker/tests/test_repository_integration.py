@@ -165,6 +165,20 @@ def test_repository_posts_fifo_and_rebuilds_performance_snapshots() -> None:
             """,
             (instrument_id, first_day.date()),
         )
+        connection.execute(
+            """
+            INSERT INTO fund_holding_snapshot (
+              fund_instrument_id, holding_date, underlying_name,
+              country_code, sector, economic_currency, weight,
+              provider, retrieved_at
+            )
+            VALUES (
+              %s, %s, 'Synthetic World Equity', 'IE',
+              'Technology', 'USD', 0.6, 'integration', %s
+            )
+            """,
+            (instrument_id, first_day.date(), first_day),
+        )
     repository.rebuild_position_snapshots(first_day.date(), "CZK")
 
     second_import = register(
@@ -200,6 +214,7 @@ def test_repository_posts_fifo_and_rebuilds_performance_snapshots() -> None:
         )
     repository.rebuild_position_snapshots(second_day.date(), "CZK")
     assert repository.rebuild_benchmark_series(second_day.date(), "CZK") == 1
+    assert repository.rebuild_exposure_snapshots(second_day.date(), "CZK") > 0
 
     with psycopg.connect(connection_string) as connection:
         lot_row = connection.execute(
@@ -209,6 +224,19 @@ def test_repository_posts_fifo_and_rebuilds_performance_snapshots() -> None:
             WHERE account_id = %s AND instrument_id = %s
             """,
             (account_id, instrument_id),
+        ).fetchone()
+        unknown_exposure = connection.execute(
+            """
+            SELECT weight, coverage
+            FROM exposure_snapshot
+            WHERE snapshot_date = %s
+              AND reporting_currency = 'CZK'
+              AND account_id IS NULL
+              AND tax_wrapper IS NULL
+              AND dimension = 'UNDERLYING'
+              AND exposure_key = 'Unknown'
+            """,
+            (second_day.date(),),
         ).fetchone()
         benchmark_value = connection.execute(
             """
@@ -239,6 +267,7 @@ def test_repository_posts_fifo_and_rebuilds_performance_snapshots() -> None:
 
     assert lot_row[0] == Decimal("6")
     assert benchmark_value == Decimal("1.4")
+    assert unknown_exposure == (Decimal("0.4"), Decimal("0.6"))
     assert snapshot[0] == Decimal("1185")
     assert snapshot[1] == Decimal("0")
     assert snapshot[2] == pytest.approx(Decimal("195") / Decimal("990"))

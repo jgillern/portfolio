@@ -1216,6 +1216,312 @@ class WorkerRepository:
                 (xirr(cash_flows), snapshot_id),
             )
 
+    def rebuild_exposure_snapshots(
+        self,
+        snapshot_date: date,
+        reporting_currency: str,
+    ) -> int:
+        with self.connection() as connection:
+            connection.execute(
+                """
+                DELETE FROM exposure_snapshot
+                WHERE snapshot_date = %s
+                  AND reporting_currency = %s
+                """,
+                (snapshot_date, reporting_currency),
+            )
+            result = connection.execute(
+                """
+                WITH positions AS (
+                  SELECT
+                    ps.account_id,
+                    a.tax_wrapper,
+                    ps.instrument_id,
+                    ps.market_value,
+                    i.name,
+                    i.asset_class,
+                    i.domicile_country,
+                    i.metadata,
+                    pr.currency AS listing_currency
+                  FROM position_snapshot ps
+                  JOIN account a ON a.id = ps.account_id
+                  JOIN instrument i ON i.id = ps.instrument_id
+                  LEFT JOIN price pr ON pr.id = ps.price_id
+                  WHERE ps.snapshot_date = %s
+                    AND ps.reporting_currency = %s
+                    AND ps.market_value IS NOT NULL
+                    AND ps.market_value > 0
+                ),
+                latest_holding_dates AS (
+                  SELECT
+                    fund_instrument_id,
+                    max(holding_date) AS holding_date
+                  FROM fund_holding_snapshot
+                  WHERE holding_date <= %s
+                  GROUP BY fund_instrument_id
+                ),
+                holdings AS (
+                  SELECT fhs.*
+                  FROM fund_holding_snapshot fhs
+                  JOIN latest_holding_dates latest
+                    ON latest.fund_instrument_id = fhs.fund_instrument_id
+                   AND latest.holding_date = fhs.holding_date
+                ),
+                coverage AS (
+                  SELECT
+                    p.account_id,
+                    p.instrument_id,
+                    coalesce(sum(h.weight), 0) AS covered_weight
+                  FROM positions p
+                  LEFT JOIN holdings h
+                    ON h.fund_instrument_id = p.instrument_id
+                  GROUP BY p.account_id, p.instrument_id
+                ),
+                direct_rows AS (
+                  SELECT
+                    p.account_id,
+                    p.tax_wrapper,
+                    'ASSET_CLASS'::exposure_dimension AS dimension,
+                    p.asset_class::text AS exposure_key,
+                    initcap(replace(p.asset_class::text, '_', ' ')) AS label,
+                    'DIRECT'::exposure_source AS source,
+                    p.market_value AS value
+                  FROM positions p
+                  UNION ALL
+                  SELECT
+                    p.account_id,
+                    p.tax_wrapper,
+                    'UNDERLYING'::exposure_dimension,
+                    p.instrument_id::text,
+                    p.name,
+                    'DIRECT'::exposure_source,
+                    p.market_value
+                  FROM positions p
+                  WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM holdings h
+                    WHERE h.fund_instrument_id = p.instrument_id
+                  )
+                  UNION ALL
+                  SELECT
+                    p.account_id,
+                    p.tax_wrapper,
+                    dimension,
+                    coalesce(exposure_key, 'Unknown'),
+                    coalesce(label, 'Unknown'),
+                    CASE
+                      WHEN exposure_key IS NULL
+                        THEN 'UNKNOWN'::exposure_source
+                      ELSE 'DIRECT'::exposure_source
+                    END,
+                    p.market_value
+                  FROM positions p
+                  CROSS JOIN LATERAL (
+                    VALUES
+                      (
+                        'GEOGRAPHY'::exposure_dimension,
+                        p.domicile_country::text,
+                        p.domicile_country::text
+                      ),
+                      (
+                        'SECTOR'::exposure_dimension,
+                        p.metadata ->> 'sector',
+                        p.metadata ->> 'sector'
+                      ),
+                      (
+                        'CURRENCY'::exposure_dimension,
+                        p.listing_currency::text,
+                        p.listing_currency::text
+                      )
+                  ) descriptors(dimension, exposure_key, label)
+                  WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM holdings h
+                    WHERE h.fund_instrument_id = p.instrument_id
+                  )
+                ),
+                look_through_rows AS (
+                  SELECT
+                    p.account_id,
+                    p.tax_wrapper,
+                    descriptors.dimension,
+                    coalesce(descriptors.exposure_key, 'Unknown'),
+                    coalesce(descriptors.label, 'Unknown'),
+                    CASE
+                      WHEN descriptors.exposure_key IS NULL
+                        THEN 'UNKNOWN'::exposure_source
+                      ELSE 'LOOK_THROUGH'::exposure_source
+                    END,
+                    p.market_value * h.weight
+                  FROM positions p
+                  JOIN holdings h
+                    ON h.fund_instrument_id = p.instrument_id
+                  CROSS JOIN LATERAL (
+                    VALUES
+                      (
+                        'GEOGRAPHY'::exposure_dimension,
+                        h.country_code::text,
+                        h.country_code::text
+                      ),
+                      (
+                        'SECTOR'::exposure_dimension,
+                        h.sector,
+                        h.sector
+                      ),
+                      (
+                        'CURRENCY'::exposure_dimension,
+                        h.economic_currency::text,
+                        h.economic_currency::text
+                      ),
+                      (
+                        'UNDERLYING'::exposure_dimension,
+                        coalesce(
+                          h.underlying_isin::text,
+                          h.underlying_name
+                        ),
+                        h.underlying_name
+                      )
+                  ) descriptors(dimension, exposure_key, label)
+                  UNION ALL
+                  SELECT
+                    p.account_id,
+                    p.tax_wrapper,
+                    dimension,
+                    'Unknown',
+                    'Unknown',
+                    'UNKNOWN'::exposure_source,
+                    p.market_value * greatest(0, 1 - c.covered_weight)
+                  FROM positions p
+                  JOIN coverage c
+                    ON c.account_id = p.account_id
+                   AND c.instrument_id = p.instrument_id
+                  CROSS JOIN (
+                    VALUES
+                      ('GEOGRAPHY'::exposure_dimension),
+                      ('SECTOR'::exposure_dimension),
+                      ('CURRENCY'::exposure_dimension),
+                      ('UNDERLYING'::exposure_dimension)
+                  ) dimensions(dimension)
+                  WHERE c.covered_weight < 1
+                    AND EXISTS (
+                      SELECT 1
+                      FROM holdings h
+                      WHERE h.fund_instrument_id = p.instrument_id
+                    )
+                ),
+                account_rows AS (
+                  SELECT * FROM direct_rows
+                  UNION ALL
+                  SELECT * FROM look_through_rows
+                ),
+                scoped_rows AS (
+                  SELECT
+                    account_id,
+                    tax_wrapper,
+                    dimension,
+                    exposure_key,
+                    label,
+                    source,
+                    value
+                  FROM account_rows
+                  UNION ALL
+                  SELECT
+                    NULL::uuid,
+                    tax_wrapper,
+                    dimension,
+                    exposure_key,
+                    label,
+                    source,
+                    value
+                  FROM account_rows
+                  UNION ALL
+                  SELECT
+                    NULL::uuid,
+                    NULL::tax_wrapper,
+                    dimension,
+                    exposure_key,
+                    label,
+                    source,
+                    value
+                  FROM account_rows
+                ),
+                grouped AS (
+                  SELECT
+                    account_id,
+                    tax_wrapper,
+                    dimension,
+                    exposure_key,
+                    label,
+                    source,
+                    sum(value) AS value
+                  FROM scoped_rows
+                  WHERE value > 0
+                  GROUP BY
+                    account_id,
+                    tax_wrapper,
+                    dimension,
+                    exposure_key,
+                    label,
+                    source
+                ),
+                denominators AS (
+                  SELECT
+                    account_id,
+                    tax_wrapper,
+                    dimension,
+                    sum(value) AS total_value,
+                    sum(value) FILTER (
+                      WHERE source <> 'UNKNOWN'
+                    ) AS known_value
+                  FROM grouped
+                  GROUP BY account_id, tax_wrapper, dimension
+                )
+                INSERT INTO exposure_snapshot (
+                  snapshot_date,
+                  reporting_currency,
+                  account_id,
+                  tax_wrapper,
+                  dimension,
+                  exposure_key,
+                  label,
+                  source,
+                  value,
+                  weight,
+                  coverage
+                )
+                SELECT
+                  %s,
+                  %s,
+                  grouped.account_id,
+                  grouped.tax_wrapper,
+                  grouped.dimension,
+                  grouped.exposure_key,
+                  grouped.label,
+                  grouped.source,
+                  grouped.value,
+                  grouped.value / denominators.total_value,
+                  coalesce(
+                    denominators.known_value / denominators.total_value,
+                    0
+                  )
+                FROM grouped
+                JOIN denominators
+                  ON denominators.account_id
+                       IS NOT DISTINCT FROM grouped.account_id
+                 AND denominators.tax_wrapper
+                       IS NOT DISTINCT FROM grouped.tax_wrapper
+                 AND denominators.dimension = grouped.dimension
+                """,
+                (
+                    snapshot_date,
+                    reporting_currency,
+                    snapshot_date,
+                    snapshot_date,
+                    reporting_currency,
+                ),
+            )
+            return result.rowcount
+
     def rebuild_benchmark_series(
         self,
         series_date: date,
