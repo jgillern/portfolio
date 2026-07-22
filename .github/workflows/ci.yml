@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-\${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -27,6 +27,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm smoke
 
   worker:
     runs-on: ubuntu-latest
@@ -45,3 +46,45 @@ jobs:
       - run: uv sync --all-groups
       - run: uv run ruff check .
       - run: uv run pytest --cov=portfolio_worker --cov-report=term-missing
+
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: portfolio
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d portfolio"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGURL: postgresql://postgres:postgres@localhost:5432/portfolio
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply migrations
+        run: |
+          for migration in migrations/*.sql; do
+            psql "$PGURL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Verify read role can use safe views
+        run: |
+          psql "$PGURL" -v ON_ERROR_STOP=1 \
+            -c "SET ROLE portfolio_app; SELECT count(*) FROM app_transaction;"
+      - name: Verify read role cannot access encrypted secrets
+        run: |
+          if psql "$PGURL" -v ON_ERROR_STOP=1 \
+            -c "SET ROLE portfolio_app; SELECT count(*) FROM encrypted_secret;"; then
+            echo "portfolio_app unexpectedly read encrypted_secret"
+            exit 1
+          fi
+      - name: Verify worker role can write
+        run: |
+          psql "$PGURL" -v ON_ERROR_STOP=1 \
+            -c "SET ROLE portfolio_worker; INSERT INTO connector_state (connector) VALUES ('TEST_CONNECTOR'); DELETE FROM connector_state WHERE connector = 'TEST_CONNECTOR';"

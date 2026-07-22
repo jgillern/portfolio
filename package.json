@@ -10,6 +10,7 @@
     "build": "pnpm --filter @portfolio/contracts build && pnpm --filter @portfolio/app build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "check": "pnpm typecheck && pnpm test"
+    "check": "pnpm typecheck && pnpm test",
+    "smoke": "node tests/smoke.mjs"
   }
 }
