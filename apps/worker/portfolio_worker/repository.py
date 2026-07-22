@@ -893,3 +893,27 @@ class WorkerRepository:
                 """,
                 (secret_id, outcome),
             )
+
+    def connector_after_epoch(
+        self,
+        connector: str,
+        *,
+        overlap_seconds: int = 172800,
+    ) -> int:
+        with self.connection() as connection:
+            row = connection.execute(
+                """
+                SELECT extract(
+                  epoch FROM (
+                    coalesce(last_success_at, now() - interval '30 days')
+                    - make_interval(secs => %s)
+                  )
+                )::bigint
+                FROM connector_state
+                WHERE connector = %s
+                """,
+                (overlap_seconds, connector),
+            ).fetchone()
+        if row is None:
+            raise RepositoryError("connector is not configured")
+        return int(row[0])

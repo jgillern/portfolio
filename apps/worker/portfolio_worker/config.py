@@ -19,6 +19,8 @@ class Settings:
     gmail_client_id: str | None
     gmail_client_secret: str | None
     gmail_redirect_uri: str | None
+    gmail_import_rules_json: str | None
+    app_base_url: str | None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -32,6 +34,8 @@ class Settings:
             gmail_client_id=os.getenv("GMAIL_CLIENT_ID"),
             gmail_client_secret=os.getenv("GMAIL_CLIENT_SECRET"),
             gmail_redirect_uri=os.getenv("GMAIL_REDIRECT_URI"),
+            gmail_import_rules_json=os.getenv("GMAIL_IMPORT_RULES_JSON"),
+            app_base_url=os.getenv("APP_BASE_URL"),
         )
 
     def require(self, name: str) -> str:
@@ -49,5 +53,10 @@ class Settings:
             "worker_signing_key",
             "cron_secret",
             "blob_token",
+            "gmail_client_id",
+            "gmail_client_secret",
+            "gmail_redirect_uri",
+            "gmail_import_rules_json",
+            "app_base_url",
         ):
             self.require(name)

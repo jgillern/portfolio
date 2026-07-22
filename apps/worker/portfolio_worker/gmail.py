@@ -91,13 +91,19 @@ class GmailClient:
         )
         self._service = build("gmail", "v1", credentials=credentials, cache_discovery=False)
 
-    def list_message_ids(self, *, label: str, after_epoch: int, limit: int = 100) -> list[str]:
+    def list_message_ids(
+        self,
+        *,
+        query: str,
+        after_epoch: int,
+        limit: int = 100,
+    ) -> list[str]:
         response = (
             self._service.users()
             .messages()
             .list(
                 userId="me",
-                q=f"label:{label} after:{after_epoch}",
+                q=f"({query}) after:{after_epoch}",
                 maxResults=min(limit, 500),
             )
             .execute()
