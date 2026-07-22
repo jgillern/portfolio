@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -12,7 +12,7 @@ def buy(quantity: str = "2") -> NormalizedEvent:
         broker_code="PATRIA",
         account_ref="patria-standard",
         event_type=EventType.BUY,
-        occurred_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        occurred_at=datetime(2026, 1, 1, tzinfo=UTC),
         instrument_name="Synthetic Equity",
         isin="US0378331005",
         quantity_delta=Decimal(quantity),

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 
 from bs4 import BeautifulSoup
 
@@ -19,11 +18,17 @@ class PatriaHtmlParser:
             rows = table.find_all("tr")
             if len(rows) < 2:
                 continue
-            headers = [normalized_header(cell.get_text(" ", strip=True)) for cell in rows[0].find_all(["th", "td"])]
+            headers = [
+                normalized_header(cell.get_text(" ", strip=True))
+                for cell in rows[0].find_all(["th", "td"])
+            ]
             if "isin" not in headers or not ({"smer", "side"} & set(headers)):
                 continue
             for row in rows[1:]:
-                values = [cell.get_text(" ", strip=True) for cell in row.find_all(["th", "td"])]
+                values = [
+                    cell.get_text(" ", strip=True)
+                    for cell in row.find_all(["th", "td"])
+                ]
                 if not values or len(values) != len(headers):
                     continue
                 item = dict(zip(headers, values, strict=True))
@@ -41,22 +46,43 @@ class PatriaHtmlParser:
 
         quantity = abs(parse_decimal(row.get("pocet") or row.get("quantity") or "0"))
         price = abs(parse_decimal(row.get("cena") or row.get("price") or "0"))
-        total = abs(parse_decimal(row.get("celkova_cena") or row.get("total") or str(quantity * price)))
+        total_value = row.get("celkova_cena") or row.get("total") or str(quantity * price)
+        total = abs(parse_decimal(total_value))
         commission = abs(parse_decimal(row.get("provize") or "0"))
         market_fee = abs(parse_decimal(row.get("poplatek_trhu") or "0"))
         currency = (row.get("mena") or row.get("currency") or "").upper()
-        occurred_at = parse_datetime(row.get("datum_obchodu") or row.get("executed_at") or "")
+        occurred_at = parse_datetime(
+            row.get("datum_obchodu") or row.get("executed_at") or ""
+        )
         settlement_raw = row.get("datum_vyporadani")
         settlement_date = None
         if settlement_raw:
             settlement_date = datetime.strptime(settlement_raw, "%d.%m.%Y").date()
 
         principal = -total if is_buy else total
-        legs = [CashLeg(leg_type=CashLegType.PRINCIPAL, currency=currency, amount=principal)]
+        legs = [
+            CashLeg(
+                leg_type=CashLegType.PRINCIPAL,
+                currency=currency,
+                amount=principal,
+            )
+        ]
         if commission:
-            legs.append(CashLeg(leg_type=CashLegType.FEE, currency=currency, amount=-commission))
+            legs.append(
+                CashLeg(
+                    leg_type=CashLegType.FEE,
+                    currency=currency,
+                    amount=-commission,
+                )
+            )
         if market_fee:
-            legs.append(CashLeg(leg_type=CashLegType.FEE, currency=currency, amount=-market_fee))
+            legs.append(
+                CashLeg(
+                    leg_type=CashLegType.FEE,
+                    currency=currency,
+                    amount=-market_fee,
+                )
+            )
 
         return NormalizedEvent(
             broker_code="PATRIA",

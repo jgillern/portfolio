@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import io
-from decimal import Decimal
 
 from ..models import CashLeg, CashLegType, EventType, ExecutionLegType, NormalizedEvent
 from .base import ParseError, normalized_header, parse_datetime, parse_decimal
@@ -24,7 +23,10 @@ class XtbCsvParser:
 
         events: list[NormalizedEvent] = []
         for raw in reader:
-            row = {normalized_header(key): (value or "").strip() for key, value in raw.items()}
+            row = {
+                normalized_header(key): (value or "").strip()
+                for key, value in raw.items()
+            }
             if not any(row.values()):
                 continue
             events.append(self._parse_row(row, account_ref))
@@ -47,16 +49,34 @@ class XtbCsvParser:
         )
         quantity = abs(parse_decimal(row.get("quantity") or row.get("objem") or "0"))
         price = abs(parse_decimal(row.get("price") or row.get("cena") or "0"))
-        total = abs(parse_decimal(row.get("total") or row.get("celkova_cena") or str(quantity * price)))
-        commission = abs(parse_decimal(row.get("commission") or row.get("provize") or "0"))
+        total_value = row.get("total") or row.get("celkova_cena") or str(quantity * price)
+        total = abs(parse_decimal(total_value))
+        commission = abs(
+            parse_decimal(row.get("commission") or row.get("provize") or "0")
+        )
         currency = (row.get("currency") or row.get("mena") or "").upper()
         occurred_at = parse_datetime(
-            row.get("executed_at") or row.get("datum_a_cas") or row.get("datum") or ""
+            row.get("executed_at")
+            or row.get("datum_a_cas")
+            or row.get("datum")
+            or ""
         )
         principal = -total if is_buy else total
-        legs = [CashLeg(leg_type=CashLegType.PRINCIPAL, currency=currency, amount=principal)]
+        legs = [
+            CashLeg(
+                leg_type=CashLegType.PRINCIPAL,
+                currency=currency,
+                amount=principal,
+            )
+        ]
         if commission:
-            legs.append(CashLeg(leg_type=CashLegType.FEE, currency=currency, amount=-commission))
+            legs.append(
+                CashLeg(
+                    leg_type=CashLegType.FEE,
+                    currency=currency,
+                    amount=-commission,
+                )
+            )
 
         return NormalizedEvent(
             broker_code="XTB",

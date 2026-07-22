@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .fingerprint import source_fingerprint
 from .parsers import PatriaHtmlParser, XtbCsvParser
@@ -33,7 +33,7 @@ class ImportService:
         gmail_message_id: str | None = None,
         mime_part_id: str | None = None,
     ) -> ImportResult:
-        received = received_at or datetime.now(timezone.utc)
+        received = received_at or datetime.now(UTC)
         broker = broker_code.upper()
         if broker == "PATRIA" and content_type.startswith("text/html"):
             parser = PatriaHtmlParser()

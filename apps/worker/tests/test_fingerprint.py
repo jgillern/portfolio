@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from portfolio_worker.fingerprint import economic_fingerprint, sha256_json
@@ -10,7 +10,7 @@ def event(leg_type: ExecutionLegType) -> NormalizedEvent:
         broker_code="XTB",
         account_ref="xtb-standard",
         event_type=EventType.BUY,
-        occurred_at=datetime(2026, 1, 2, 10, 30, tzinfo=timezone.utc),
+        occurred_at=datetime(2026, 1, 2, 10, 30, tzinfo=UTC),
         instrument_name="Synthetic World ETF",
         isin="IE00B4L5Y983",
         quantity_delta=Decimal("1.25"),

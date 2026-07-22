@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
+GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
+
 
 @dataclass(frozen=True, slots=True)
 class GmailPart:
     part_id: str
+    attachment_id: str | None
     mime_type: str
     filename: str
     data: bytes
@@ -40,12 +43,12 @@ def decode_message(message: dict[str, Any]) -> GmailMessage:
 
     def visit(part: dict[str, Any]) -> None:
         body = part.get("body") or {}
-        data = _decode(body.get("data"))
         item = GmailPart(
             part_id=part.get("partId") or "",
+            attachment_id=body.get("attachmentId"),
             mime_type=part.get("mimeType") or "application/octet-stream",
             filename=part.get("filename") or "",
-            data=data,
+            data=_decode(body.get("data")),
         )
         if item.filename:
             attachments.append(item)
@@ -59,7 +62,7 @@ def decode_message(message: dict[str, Any]) -> GmailMessage:
     visit(message.get("payload") or {})
     received_at = datetime.fromtimestamp(
         int(message.get("internalDate") or "0") / 1000,
-        tz=timezone.utc,
+        tz=UTC,
     )
     return GmailMessage(
         message_id=message["id"],
@@ -81,7 +84,7 @@ class GmailClient:
         credentials = Credentials(
             token=None,
             refresh_token=refresh_token,
-            token_uri="https://oauth2.googleapis.com/token",
+            token_uri=GOOGLE_TOKEN_URI,
             client_id=client_id,
             client_secret=client_secret,
             scopes=["https://www.googleapis.com/auth/gmail.readonly"],
@@ -111,19 +114,24 @@ class GmailClient:
         message = decode_message(raw)
         parts: list[GmailPart] = []
         for part in message.attachments:
-            if part.data:
+            if part.data or not part.attachment_id:
                 parts.append(part)
                 continue
             attachment = (
                 self._service.users()
                 .messages()
                 .attachments()
-                .get(userId="me", messageId=message_id, id=part.part_id)
+                .get(
+                    userId="me",
+                    messageId=message_id,
+                    id=part.attachment_id,
+                )
                 .execute()
             )
             parts.append(
                 GmailPart(
                     part_id=part.part_id,
+                    attachment_id=part.attachment_id,
                     mime_type=part.mime_type,
                     filename=part.filename,
                     data=_decode(attachment.get("data")),

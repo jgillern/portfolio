@@ -101,7 +101,10 @@ class NormalizedEvent(BaseModel):
         }
         if self.event_type in instrument_events and not (self.isin or self.instrument_name):
             raise ValueError("instrument event requires an ISIN or instrument name")
-        if self.event_type in {EventType.DEPOSIT, EventType.WITHDRAWAL} and not self.external_cash_flow:
+        if (
+            self.event_type in {EventType.DEPOSIT, EventType.WITHDRAWAL}
+            and not self.external_cash_flow
+        ):
             raise ValueError("deposit and withdrawal must be external cash flows")
         if (
             self.trade_date is not None

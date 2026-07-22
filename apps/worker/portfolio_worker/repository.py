@@ -92,7 +92,11 @@ class WorkerRepository:
                 raise RepositoryError("broker does not exist")
             return existing[0], False
 
-    def _ensure_instrument(self, connection: Connection[Any], event: NormalizedEvent) -> UUID | None:
+    def _ensure_instrument(
+        self,
+        connection: Connection[Any],
+        event: NormalizedEvent,
+    ) -> UUID | None:
         if event.isin is None and event.instrument_name is None:
             return None
         if event.isin is not None:

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
@@ -73,7 +74,7 @@ def health() -> dict[str, str]:
 @app.get("/api/cron/daily")
 def daily_cron(authorization: str | None = Header(default=None)) -> dict[str, str | bool]:
     _verify_cron(authorization)
-    key = datetime.now(timezone.utc).date().isoformat()
+    key = datetime.now(UTC).date().isoformat()
     try:
         job_id, created = _repository().start_job("DAILY", f"daily:{key}")
     except RepositoryError as exc:
@@ -84,9 +85,9 @@ def daily_cron(authorization: str | None = Header(default=None)) -> dict[str, st
 @app.post("/api/import")
 async def import_document(
     request: Request,
-    broker_code: str = Form(),
-    account_ref: str = Form(),
-    document: UploadFile = File(),
+    broker_code: Annotated[str, Form()],
+    account_ref: Annotated[str, Form()],
+    document: Annotated[UploadFile, File()],
     x_portfolio_timestamp: str | None = Header(default=None),
     x_portfolio_signature: str | None = Header(default=None),
     x_portfolio_content_sha256: str | None = Header(default=None),
