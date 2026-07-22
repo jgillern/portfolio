@@ -6,8 +6,8 @@ from datetime import UTC, datetime
 from .archive import EncryptedArchive
 from .fingerprint import source_fingerprint
 from .parsers import GeorgePdfParser, PatriaHtmlParser, XtbCsvParser, XtbPdfParser
-from .parsers.pdf import extract_pdf_text
 from .parsers.base import ParseError
+from .parsers.pdf import extract_pdf_text
 from .repository import WorkerRepository
 
 
