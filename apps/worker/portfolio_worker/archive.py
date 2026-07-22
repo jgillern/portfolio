@@ -66,7 +66,12 @@ class EncryptedArchive:
         encrypted = self._box.encrypt_blob(payload, object_key=pathname)
         return self._writer.put(pathname, encrypted)
 
-    def store_backup(self, *, pathname: str, tables: dict[str, list[dict[str, Any]]]) -> ArchivedBlob:
+    def store_backup(
+        self,
+        *,
+        pathname: str,
+        tables: dict[str, list[dict[str, Any]]],
+    ) -> ArchivedBlob:
         serialized = json.dumps(
             tables,
             default=_json_default,

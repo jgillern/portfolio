@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from xml.etree import ElementTree
 
 import httpx
+from defusedxml import ElementTree
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,6 +1,12 @@
 from decimal import Decimal
 
-from portfolio_worker.valuation import FundHolding, FxBook, PositionInput, look_through_exposure, value_positions
+from portfolio_worker.valuation import (
+    FundHolding,
+    FxBook,
+    PositionInput,
+    look_through_exposure,
+    value_positions,
+)
 
 
 def test_valuation_marks_missing_fx_instead_of_returning_zero() -> None:

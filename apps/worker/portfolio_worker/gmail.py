@@ -8,7 +8,7 @@ from typing import Any
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
-GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
+GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"  # noqa: S105
 
 
 @dataclass(frozen=True, slots=True)
