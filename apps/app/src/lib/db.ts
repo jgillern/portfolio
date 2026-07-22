@@ -16,7 +16,6 @@ export function readDatabase(): Sql {
     idle_timeout: 20,
     connect_timeout: 10,
     prepare: false,
-    application_name: "portfolio-app-readonly",
   });
   return client;
 }

@@ -296,7 +296,9 @@ export async function getPerformance(filter: PortfolioFilter): Promise<Performan
       .map((point) => ({
         ...point,
         benchmarks: Object.fromEntries(
-          Object.entries(point.benchmarks).filter(([code]) => !filter.benchmark.length || filter.benchmark.includes(code as "SP500" | "MSCI_WORLD" | "MSCI_ACWI")),
+          Object.entries(point.benchmarks).filter(([code]) =>
+            filter.benchmark.includes(code as "SP500" | "MSCI_WORLD" | "MSCI_ACWI"),
+          ),
         ),
       }));
   }

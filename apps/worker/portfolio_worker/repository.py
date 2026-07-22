@@ -145,6 +145,7 @@ class WorkerRepository:
                         )
                         VALUES (%s, %s, %s, %s, %s)
                         ON CONFLICT (account_id, raw_import_id, external_order_id)
+                        WHERE external_order_id IS NOT NULL
                         DO UPDATE SET executed_at = EXCLUDED.executed_at
                         RETURNING id
                         """,
