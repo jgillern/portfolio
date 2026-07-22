@@ -75,20 +75,20 @@ export async function getSummary(filter: PortfolioFilter): Promise<PortfolioSumm
       (
         SELECT coalesce(sum(flow.net_external_flow), 0)
         FROM portfolio_snapshot flow
-        WHERE flow.reporting_currency = ${filter.reporting_currency
+        WHERE flow.reporting_currency = ${filter.reporting_currency}
           AND flow.account_id IS NULL
-          AND (${filter.tax_wrapper::tax_wrapper IS NULL OR flow.tax_wrapper = ${filter.tax_wrapper::tax_wrapper)
-          AND (${filter.from::date IS NULL OR flow.snapshot_date >= ${filter.from::date)
-          AND (${filter.to::date IS NULL OR flow.snapshot_date <= ${filter.to::date)
+          AND (${filter.tax_wrapper ?? null}::tax_wrapper IS NULL OR flow.tax_wrapper = ${filter.tax_wrapper ?? null}::tax_wrapper)
+          AND (${filter.from ?? null}::date IS NULL OR flow.snapshot_date >= ${filter.from ?? null}::date)
+          AND (${filter.to ?? null}::date IS NULL OR flow.snapshot_date <= ${filter.to ?? null}::date)
       ) AS net_external_flows,
       ps.cumulative_twr,
       greatest(ps.price_set_as_of, ps.fx_set_as_of) AS as_of,
       lower(ps.quality::text) AS quality
     FROM portfolio_snapshot ps
-    WHERE ps.reporting_currency = ${filter.reporting_currency
+    WHERE ps.reporting_currency = ${filter.reporting_currency}
       AND ps.account_id IS NULL
-      AND (${filter.tax_wrapper::tax_wrapper IS NULL OR ps.tax_wrapper = ${filter.tax_wrapper::tax_wrapper)
-      AND (${filter.to::date IS NULL OR ps.snapshot_date <= ${filter.to::date)
+      AND (${filter.tax_wrapper ?? null}::tax_wrapper IS NULL OR ps.tax_wrapper = ${filter.tax_wrapper ?? null}::tax_wrapper)
+      AND (${filter.to ?? null}::date IS NULL OR ps.snapshot_date <= ${filter.to ?? null}::date)
     ORDER BY ps.snapshot_date DESC
     LIMIT 1
   `;
@@ -169,7 +169,7 @@ export async function getHoldings(filter: PortfolioFilter): Promise<Holding[]> {
       FROM position_snapshot ps
       WHERE ps.account_id = h.account_id
         AND ps.instrument_id = h.instrument_id
-        AND ps.reporting_currency = ${filter.reporting_currency
+        AND ps.reporting_currency = ${filter.reporting_currency}
       ORDER BY ps.snapshot_date DESC
       LIMIT 1
     ) valuation ON true
@@ -184,14 +184,14 @@ export async function getHoldings(filter: PortfolioFilter): Promise<Holding[]> {
     LEFT JOIN LATERAL (
       SELECT market_value
       FROM portfolio_snapshot
-      WHERE reporting_currency = ${filter.reporting_currency
+      WHERE reporting_currency = ${filter.reporting_currency}
         AND account_id IS NULL
       ORDER BY snapshot_date DESC
       LIMIT 1
     ) total ON true
-    WHERE (${filter.account_id::uuid IS NULL OR h.account_id = ${filter.account_id::uuid)
-      AND (${filter.broker_id::uuid IS NULL OR aa.broker_id = ${filter.broker_id::uuid)
-      AND (${filter.tax_wrapper::tax_wrapper IS NULL OR h.tax_wrapper = ${filter.tax_wrapper::tax_wrapper)
+    WHERE (${filter.account_id ?? null}::uuid IS NULL OR h.account_id = ${filter.account_id ?? null}::uuid)
+      AND (${filter.broker_id ?? null}::uuid IS NULL OR aa.broker_id = ${filter.broker_id ?? null}::uuid)
+      AND (${filter.tax_wrapper ?? null}::tax_wrapper IS NULL OR h.tax_wrapper = ${filter.tax_wrapper ?? null}::tax_wrapper)
     ORDER BY valuation.market_value DESC NULLS LAST, h.name
   `;
   return rows.map((row) => ({
@@ -221,11 +221,11 @@ export async function getTransactions(filter: PortfolioFilter): Promise<Transact
   const rows = await sql`
     SELECT *
     FROM app_transaction
-    WHERE (${filter.from::date IS NULL OR occurred_at::date >= ${filter.from::date)
-      AND (${filter.to::date IS NULL OR occurred_at::date <= ${filter.to::date)
-      AND (${filter.account_id::uuid IS NULL OR account_id = ${filter.account_id::uuid)
-      AND (${filter.broker_id::uuid IS NULL OR broker_id = ${filter.broker_id::uuid)
-      AND (${filter.tax_wrapper::tax_wrapper IS NULL OR tax_wrapper = ${filter.tax_wrapper::tax_wrapper)
+    WHERE (${filter.from ?? null}::date IS NULL OR occurred_at::date >= ${filter.from ?? null}::date)
+      AND (${filter.to ?? null}::date IS NULL OR occurred_at::date <= ${filter.to ?? null}::date)
+      AND (${filter.account_id ?? null}::uuid IS NULL OR account_id = ${filter.account_id ?? null}::uuid)
+      AND (${filter.broker_id ?? null}::uuid IS NULL OR broker_id = ${filter.broker_id ?? null}::uuid)
+      AND (${filter.tax_wrapper ?? null}::tax_wrapper IS NULL OR tax_wrapper = ${filter.tax_wrapper ?? null}::tax_wrapper)
     ORDER BY occurred_at DESC
     LIMIT 500
   `;
@@ -266,14 +266,14 @@ export async function getExposures(
       coverage,
       snapshot_date
     FROM exposure_snapshot
-    WHERE reporting_currency = ${filter.reporting_currency
-      AND (${filter.account_id::uuid IS NULL OR account_id = ${filter.account_id::uuid)
-      AND (${filter.tax_wrapper::tax_wrapper IS NULL OR tax_wrapper = ${filter.tax_wrapper::tax_wrapper)
-      AND (${dimension::text IS NULL OR dimension::text = upper(${dimension::text))
+    WHERE reporting_currency = ${filter.reporting_currency}
+      AND (${filter.account_id ?? null}::uuid IS NULL OR account_id = ${filter.account_id ?? null}::uuid)
+      AND (${filter.tax_wrapper ?? null}::tax_wrapper IS NULL OR tax_wrapper = ${filter.tax_wrapper ?? null}::tax_wrapper)
+      AND (${dimension ?? null}::text IS NULL OR dimension::text = upper(${dimension ?? null}::text))
       AND snapshot_date = (
         SELECT max(snapshot_date)
         FROM exposure_snapshot
-        WHERE reporting_currency = ${filter.reporting_currency
+        WHERE reporting_currency = ${filter.reporting_currency}
       )
     ORDER BY dimension, weight DESC
   `;
@@ -304,11 +304,11 @@ export async function getPerformance(filter: PortfolioFilter): Promise<Performan
   const portfolioRows = await sql`
     SELECT snapshot_date, cumulative_twr, lower(quality::text) AS quality
     FROM portfolio_snapshot
-    WHERE reporting_currency = ${filter.reporting_currency
-      AND (${filter.account_id::uuid IS NULL OR account_id = ${filter.account_id::uuid)
-      AND (${filter.tax_wrapper::tax_wrapper IS NULL OR tax_wrapper = ${filter.tax_wrapper::tax_wrapper)
-      AND (${filter.from::date IS NULL OR snapshot_date >= ${filter.from::date)
-      AND (${filter.to::date IS NULL OR snapshot_date <= ${filter.to::date)
+    WHERE reporting_currency = ${filter.reporting_currency}
+      AND (${filter.account_id ?? null}::uuid IS NULL OR account_id = ${filter.account_id ?? null}::uuid)
+      AND (${filter.tax_wrapper ?? null}::tax_wrapper IS NULL OR tax_wrapper = ${filter.tax_wrapper ?? null}::tax_wrapper)
+      AND (${filter.from ?? null}::date IS NULL OR snapshot_date >= ${filter.from ?? null}::date)
+      AND (${filter.to ?? null}::date IS NULL OR snapshot_date <= ${filter.to ?? null}::date)
     ORDER BY snapshot_date
   `;
   const benchmarkRows = filter.benchmark.length
@@ -316,10 +316,10 @@ export async function getPerformance(filter: PortfolioFilter): Promise<Performan
         SELECT bs.series_date, b.code, bs.normalized_value
         FROM benchmark_series bs
         JOIN benchmark b ON b.id = bs.benchmark_id
-        WHERE bs.reporting_currency = ${filter.reporting_currency
-          AND b.code IN ${sql(filter.benchmark)
-          AND (${filter.from::date IS NULL OR bs.series_date >= ${filter.from::date)
-          AND (${filter.to::date IS NULL OR bs.series_date <= ${filter.to::date)
+        WHERE bs.reporting_currency = ${filter.reporting_currency}
+          AND b.code IN ${sql(filter.benchmark)}
+          AND (${filter.from ?? null}::date IS NULL OR bs.series_date >= ${filter.from ?? null}::date)
+          AND (${filter.to ?? null}::date IS NULL OR bs.series_date <= ${filter.to ?? null}::date)
       `
     : [];
   const benchmarkByDate = new Map<string, PerformancePoint["benchmarks"]>();
@@ -403,11 +403,11 @@ export async function getIncomeCosts(filter: PortfolioFilter): Promise<IncomeCos
       coalesce(sum(fee_amount), 0) AS fees,
       coalesce(sum(tax_amount), 0) AS taxes
     FROM app_transaction
-    WHERE (${filter.from::date IS NULL OR occurred_at::date >= ${filter.from::date)
-      AND (${filter.to::date IS NULL OR occurred_at::date <= ${filter.to::date)
-      AND (${filter.account_id::uuid IS NULL OR account_id = ${filter.account_id::uuid)
-      AND (${filter.broker_id::uuid IS NULL OR broker_id = ${filter.broker_id::uuid)
-      AND (${filter.tax_wrapper::tax_wrapper IS NULL OR tax_wrapper = ${filter.tax_wrapper::tax_wrapper)
+    WHERE (${filter.from ?? null}::date IS NULL OR occurred_at::date >= ${filter.from ?? null}::date)
+      AND (${filter.to ?? null}::date IS NULL OR occurred_at::date <= ${filter.to ?? null}::date)
+      AND (${filter.account_id ?? null}::uuid IS NULL OR account_id = ${filter.account_id ?? null}::uuid)
+      AND (${filter.broker_id ?? null}::uuid IS NULL OR broker_id = ${filter.broker_id ?? null}::uuid)
+      AND (${filter.tax_wrapper ?? null}::tax_wrapper IS NULL OR tax_wrapper = ${filter.tax_wrapper ?? null}::tax_wrapper)
   `;
   const row = rows[0] ?? {};
   return {

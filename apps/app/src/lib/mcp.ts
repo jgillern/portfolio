@@ -120,7 +120,7 @@ function createServer(): McpServer {
   );
 
   server.registerTool(
-    "get_exposure",
+    "get_exposures",
     {
       title: "Portfolio exposure",
       description: "Read direct, look-through and Unknown exposure with coverage.",
@@ -159,7 +159,7 @@ function createServer(): McpServer {
   );
 
   server.registerTool(
-    "get_income_costs",
+    "get_income_and_costs",
     {
       title: "Income and costs",
       description: "Read dividends, interest, fees and taxes.",

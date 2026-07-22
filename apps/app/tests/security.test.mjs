@@ -3,6 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const auth = await readFile(new URL("../src/lib/auth.ts", import.meta.url), "utf8");
+const session = await readFile(
+  new URL("../src/app/api/session/route.ts", import.meta.url),
+  "utf8",
+);
 const mcp = await readFile(new URL("../src/lib/mcp.ts", import.meta.url), "utf8");
 const api = await readFile(
   new URL("../src/app/v1/[...resource]/route.ts", import.meta.url),
@@ -12,8 +16,8 @@ const api = await readFile(
 test("owner session is HTTP-only, strict and signed", () => {
   assert.match(auth, /createHmac\("sha256"/);
   assert.match(auth, /timingSafeEqual/);
-  assert.match(auth, /sameSite: "strict"/);
-  assert.match(auth, /httpOnly: true/);
+  assert.match(session, /sameSite: "strict"/);
+  assert.match(session, /httpOnly: true/);
 });
 
 test("MCP authenticates and exposes only named read tools", () => {
@@ -27,10 +31,10 @@ test("MCP authenticates and exposes only named read tools", () => {
     "get_holdings",
     "get_transactions",
     "get_performance",
-    "get_exposure",
+    "get_exposures",
     "get_import_status",
     "get_data_quality_issues",
-    "get_income_costs",
+    "get_income_and_costs",
     "get_methodology",
   ]);
 });
