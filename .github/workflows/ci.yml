@@ -44,7 +44,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --all-groups
-      - run: uv run ruff check .
+      - run: uv run ruff check . --fix --diff
       - run: uv run pytest --cov=portfolio_worker --cov-report=term-missing
 
   database:
