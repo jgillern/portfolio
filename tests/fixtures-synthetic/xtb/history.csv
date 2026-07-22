@@ -1,0 +1,3 @@
+order_id,leg_type,symbol,name,isin,side,quantity,price,currency,executed_at,commission,total,venue
+SYN-XTB-1,whole_share,IWDA.UK,Synthetic World ETF,IE00B4L5Y983,buy,1,100,EUR,2026-01-02T10:30:00+01:00,0.20,100,LSE
+SYN-XTB-1,fractional_right,IWDA.UK,Synthetic World ETF,IE00B4L5Y983,buy,0.25,100,EUR,2026-01-02T10:30:00+01:00,0.05,25,LSE
