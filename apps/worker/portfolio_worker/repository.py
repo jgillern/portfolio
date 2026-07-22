@@ -1216,6 +1216,107 @@ class WorkerRepository:
                 (xirr(cash_flows), snapshot_id),
             )
 
+    def rebuild_benchmark_series(
+        self,
+        series_date: date,
+        reporting_currency: str,
+    ) -> int:
+        with self.connection() as connection:
+            result = connection.execute(
+                """
+                WITH quotes AS (
+                  SELECT
+                    b.id AS benchmark_id,
+                    current_price.id AS price_id,
+                    current_price.price_date,
+                    current_price.close
+                      * portfolio_fx_factor(
+                          current_price.currency,
+                          %s,
+                          current_price.price_date
+                        ) AS current_value,
+                    base_price.close
+                      * portfolio_fx_factor(
+                          base_price.currency,
+                          %s,
+                          base_price.price_date
+                        ) AS base_value,
+                    current_price.quality,
+                    current_price.retrieved_at
+                  FROM benchmark b
+                  JOIN LATERAL (
+                    SELECT p.*
+                    FROM price p
+                    WHERE p.instrument_id = b.proxy_instrument_id
+                      AND (
+                        b.proxy_listing_id IS NULL
+                        OR p.listing_id = b.proxy_listing_id
+                      )
+                      AND p.price_date <= %s
+                    ORDER BY p.price_date DESC, p.retrieved_at DESC
+                    LIMIT 1
+                  ) current_price ON true
+                  JOIN LATERAL (
+                    SELECT p.*
+                    FROM price p
+                    WHERE p.instrument_id = b.proxy_instrument_id
+                      AND (
+                        b.proxy_listing_id IS NULL
+                        OR p.listing_id = b.proxy_listing_id
+                      )
+                      AND p.price_date >= b.valid_from
+                      AND p.price_date <= %s
+                    ORDER BY p.price_date, p.retrieved_at
+                    LIMIT 1
+                  ) base_price ON true
+                  WHERE b.valid_from <= %s
+                    AND (b.valid_to IS NULL OR b.valid_to >= %s)
+                )
+                INSERT INTO benchmark_series (
+                  benchmark_id, series_date, reporting_currency,
+                  normalized_value, price_id, fx_rate_id, quality
+                )
+                SELECT
+                  benchmark_id,
+                  %s,
+                  %s,
+                  current_value / base_value,
+                  price_id,
+                  NULL,
+                  CASE
+                    WHEN current_value IS NULL OR base_value IS NULL
+                      THEN 'MISSING'::data_quality
+                    WHEN %s - price_date > 5
+                      THEN 'STALE'::data_quality
+                    ELSE quality
+                  END
+                FROM quotes
+                WHERE current_value IS NOT NULL
+                  AND base_value IS NOT NULL
+                  AND base_value <> 0
+                ON CONFLICT (
+                  benchmark_id, series_date, reporting_currency
+                )
+                DO UPDATE SET
+                  normalized_value = EXCLUDED.normalized_value,
+                  price_id = EXCLUDED.price_id,
+                  fx_rate_id = EXCLUDED.fx_rate_id,
+                  quality = EXCLUDED.quality
+                """,
+                (
+                    reporting_currency,
+                    reporting_currency,
+                    series_date,
+                    series_date,
+                    series_date,
+                    series_date,
+                    series_date,
+                    reporting_currency,
+                    series_date,
+                ),
+            )
+            return result.rowcount
+
     def refresh_data_quality_issues(self, snapshot_date: date) -> int:
         with self.connection() as connection:
             connection.execute(

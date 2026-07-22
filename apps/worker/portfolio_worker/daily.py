@@ -46,6 +46,12 @@ class DailyRepository(Protocol):
         reporting_currency: str,
     ) -> int: ...
 
+    def rebuild_benchmark_series(
+        self,
+        series_date: date,
+        reporting_currency: str,
+    ) -> int: ...
+
     def refresh_data_quality_issues(self, snapshot_date: date) -> int: ...
 
     def export_backup_tables(self) -> dict[str, list[dict[str, Any]]]: ...
@@ -184,7 +190,11 @@ def build_daily_steps(
             currency: repository.rebuild_position_snapshots(run_date, currency)
             for currency in ("CZK", "EUR")
         }
-        return {"positions": counts}
+        benchmarks = {
+            currency: repository.rebuild_benchmark_series(run_date, currency)
+            for currency in ("CZK", "EUR")
+        }
+        return {"positions": counts, "benchmarks": benchmarks}
 
     def quality_checks() -> dict[str, Any]:
         return {

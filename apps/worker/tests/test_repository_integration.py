@@ -153,6 +153,18 @@ def test_repository_posts_fifo_and_rebuilds_performance_snapshots() -> None:
             """,
             (instrument_id, first_day.date(), first_day),
         )
+        connection.execute(
+            """
+            INSERT INTO benchmark (
+              code, display_name, proxy_instrument_id,
+              methodology_version, valid_from
+            )
+            VALUES (
+              'SP500', 'S&P 500 ETF proxy', %s, 'integration-1', %s
+            )
+            """,
+            (instrument_id, first_day.date()),
+        )
     repository.rebuild_position_snapshots(first_day.date(), "CZK")
 
     second_import = register(
@@ -187,6 +199,7 @@ def test_repository_posts_fifo_and_rebuilds_performance_snapshots() -> None:
             (instrument_id, second_day.date(), second_day),
         )
     repository.rebuild_position_snapshots(second_day.date(), "CZK")
+    assert repository.rebuild_benchmark_series(second_day.date(), "CZK") == 1
 
     with psycopg.connect(connection_string) as connection:
         lot_row = connection.execute(
@@ -197,6 +210,15 @@ def test_repository_posts_fifo_and_rebuilds_performance_snapshots() -> None:
             """,
             (account_id, instrument_id),
         ).fetchone()
+        benchmark_value = connection.execute(
+            """
+            SELECT normalized_value
+            FROM benchmark_series
+            WHERE series_date = %s
+              AND reporting_currency = 'CZK'
+            """,
+            (second_day.date(),),
+        ).fetchone()[0]
         snapshot = connection.execute(
             """
             SELECT
@@ -216,6 +238,7 @@ def test_repository_posts_fifo_and_rebuilds_performance_snapshots() -> None:
         ).fetchone()
 
     assert lot_row[0] == Decimal("6")
+    assert benchmark_value == Decimal("1.4")
     assert snapshot[0] == Decimal("1185")
     assert snapshot[1] == Decimal("0")
     assert snapshot[2] == pytest.approx(Decimal("195") / Decimal("990"))
