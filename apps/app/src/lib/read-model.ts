@@ -70,30 +70,84 @@ export async function getSummary(filter: PortfolioFilter): Promise<PortfolioSumm
   }
   const sql = readDatabase();
   const rows = await sql`
+    WITH scoped AS (
+      SELECT ps.*
+      FROM portfolio_snapshot ps
+      LEFT JOIN account a ON a.id = ps.account_id
+      WHERE ps.reporting_currency = ${filter.reporting_currency}
+        AND ps.tax_wrapper IS NOT DISTINCT FROM ${filter.tax_wrapper ?? null}::tax_wrapper
+        AND (
+          (
+            ${filter.account_id ?? null}::uuid IS NOT NULL
+            AND ps.account_id = ${filter.account_id ?? null}::uuid
+          )
+          OR (
+            ${filter.account_id ?? null}::uuid IS NULL
+            AND ${filter.broker_id ?? null}::uuid IS NULL
+            AND ps.account_id IS NULL
+          )
+          OR (
+            ${filter.account_id ?? null}::uuid IS NULL
+            AND ${filter.broker_id ?? null}::uuid IS NOT NULL
+            AND ps.account_id IS NOT NULL
+            AND a.broker_id = ${filter.broker_id ?? null}::uuid
+          )
+        )
+        AND (${filter.to ?? null}::date IS NULL OR ps.snapshot_date <= ${filter.to ?? null}::date)
+    ),
+    latest AS (
+      SELECT max(snapshot_date) AS snapshot_date
+      FROM scoped
+    ),
+    opening AS (
+      SELECT
+        coalesce(sum(market_value), 0) AS market_value,
+        coalesce(sum(realized_result), 0) AS realized_result,
+        coalesce(sum(income), 0) AS income,
+        coalesce(sum(fees), 0) AS fees,
+        coalesce(sum(taxes), 0) AS taxes
+      FROM scoped
+      WHERE ${filter.from ?? null}::date IS NOT NULL
+        AND snapshot_date = (
+          SELECT max(snapshot_date)
+          FROM scoped
+          WHERE snapshot_date < ${filter.from ?? null}::date
+        )
+    )
     SELECT
-      ps.market_value,
+      sum(ps.market_value) AS market_value,
       (
         SELECT coalesce(sum(flow.net_external_flow), 0)
-        FROM portfolio_snapshot flow
-        WHERE flow.reporting_currency = ${filter.reporting_currency}
-          AND flow.account_id IS NULL
-          AND (${filter.tax_wrapper ?? null}::tax_wrapper IS NULL OR flow.tax_wrapper = ${filter.tax_wrapper ?? null}::tax_wrapper)
-          AND (${filter.from ?? null}::date IS NULL OR flow.snapshot_date >= ${filter.from ?? null}::date)
-          AND (${filter.to ?? null}::date IS NULL OR flow.snapshot_date <= ${filter.to ?? null}::date)
+        FROM scoped flow
+        WHERE (${filter.from ?? null}::date IS NULL OR flow.snapshot_date >= ${filter.from ?? null}::date)
       ) AS net_external_flows,
-      ps.cumulative_twr,
-      greatest(ps.price_set_as_of, ps.fx_set_as_of) AS as_of,
-      lower(ps.quality::text) AS quality
-    FROM portfolio_snapshot ps
-    WHERE ps.reporting_currency = ${filter.reporting_currency}
-      AND ps.account_id IS NULL
-      AND (${filter.tax_wrapper ?? null}::tax_wrapper IS NULL OR ps.tax_wrapper = ${filter.tax_wrapper ?? null}::tax_wrapper)
-      AND (${filter.to ?? null}::date IS NULL OR ps.snapshot_date <= ${filter.to ?? null}::date)
-    ORDER BY ps.snapshot_date DESC
-    LIMIT 1
+      CASE WHEN count(*) = 1 THEN max(ps.cumulative_twr) ELSE NULL END AS cumulative_twr,
+      CASE WHEN count(*) = 1 THEN max(ps.xirr) ELSE NULL END AS xirr,
+      sum(ps.realized_result) - opening.realized_result AS realized_result,
+      sum(ps.unrealized_result) AS unrealized_result,
+      sum(ps.income) - opening.income AS income,
+      sum(ps.fees) - opening.fees AS fees,
+      sum(ps.taxes) - opening.taxes AS taxes,
+      opening.market_value AS opening_value,
+      greatest(max(ps.price_set_as_of), max(ps.fx_set_as_of)) AS as_of,
+      CASE
+        WHEN bool_or(ps.quality = 'MISSING') THEN 'missing'
+        WHEN bool_or(ps.quality IN ('STALE', 'PARTIAL')) THEN 'partial'
+        ELSE 'verified'
+      END AS quality
+    FROM scoped ps
+    CROSS JOIN latest
+    CROSS JOIN opening
+    WHERE ps.snapshot_date = latest.snapshot_date
+    GROUP BY
+      opening.market_value,
+      opening.realized_result,
+      opening.income,
+      opening.fees,
+      opening.taxes
   `;
   const row = rows[0];
-  if (!row) {
+  if (!row || row.market_value === null) {
     return {
       ...syntheticSummary,
       market_value: "0",
@@ -115,26 +169,26 @@ export async function getSummary(filter: PortfolioFilter): Promise<PortfolioSumm
       },
     };
   }
-  const cash = await getIncomeCosts(filter);
   const marketValue = Number(row.market_value);
   const netFlows = Number(row.net_external_flows);
+  const openingValue = Number(row.opening_value);
   return {
     market_value: decimal(row.market_value),
     net_external_flows: decimal(row.net_external_flows),
-    absolute_result: decimal(marketValue - netFlows),
+    absolute_result: decimal(marketValue - openingValue - netFlows),
     twr: nullableDecimal(row.cumulative_twr),
-    xirr: null,
-    realized_result: "0",
-    unrealized_result: decimal(marketValue - netFlows - Number(cash.dividends) - Number(cash.interest)),
-    income: decimal(Number(cash.dividends) + Number(cash.interest)),
-    fees: cash.fees,
-    taxes: cash.taxes,
+    xirr: nullableDecimal(row.xirr),
+    realized_result: decimal(row.realized_result),
+    unrealized_result: decimal(row.unrealized_result),
+    income: decimal(row.income),
+    fees: decimal(row.fees),
+    taxes: decimal(row.taxes),
     meta: {
       as_of: iso(row.as_of),
-      data_freshness: String(row.quality).toLowerCase() as PortfolioSummary["meta"]["data_freshness"],
+      data_freshness: String(row.quality) as PortfolioSummary["meta"]["data_freshness"],
       currency: filter.reporting_currency,
       methodology_version: "2026.1",
-      sources: ["canonical ledger", "position snapshots", "market and FX providers"],
+      sources: ["canonical ledger", "FIFO lots", "market and FX snapshots"],
     },
   };
 }
@@ -152,7 +206,7 @@ export async function getHoldings(filter: PortfolioFilter): Promise<Holding[]> {
       price.close AS price,
       price.currency AS price_currency,
       valuation.market_value,
-      NULL::numeric AS unrealized_result,
+      valuation.unrealized_result,
       CASE
         WHEN total.market_value = 0 THEN NULL
         ELSE valuation.market_value / total.market_value
@@ -165,7 +219,11 @@ export async function getHoldings(filter: PortfolioFilter): Promise<Holding[]> {
     FROM app_holding h
     JOIN app_account aa ON aa.id = h.account_id
     LEFT JOIN LATERAL (
-      SELECT ps.market_value, ps.quality, ps.price_id
+      SELECT
+        ps.market_value,
+        ps.unrealized_result,
+        ps.quality,
+        ps.price_id
       FROM position_snapshot ps
       WHERE ps.account_id = h.account_id
         AND ps.instrument_id = h.instrument_id
@@ -400,10 +458,50 @@ export async function getIncomeCosts(filter: PortfolioFilter): Promise<IncomeCos
   const sql = readDatabase();
   const rows = await sql`
     SELECT
-      coalesce(sum(gross_amount) FILTER (WHERE event_type = 'DIVIDEND'), 0) AS dividends,
-      coalesce(sum(gross_amount) FILTER (WHERE event_type = 'INTEREST'), 0) AS interest,
-      coalesce(sum(fee_amount), 0) AS fees,
-      coalesce(sum(tax_amount), 0) AS taxes
+      coalesce(
+        sum(
+          gross_amount
+          * portfolio_fx_factor(
+              gross_currency,
+              ${filter.reporting_currency},
+              occurred_at::date
+            )
+        ) FILTER (WHERE event_type = 'DIVIDEND'),
+        0
+      ) AS dividends,
+      coalesce(
+        sum(
+          gross_amount
+          * portfolio_fx_factor(
+              gross_currency,
+              ${filter.reporting_currency},
+              occurred_at::date
+            )
+        ) FILTER (WHERE event_type = 'INTEREST'),
+        0
+      ) AS interest,
+      coalesce(
+        sum(
+          abs(fee_amount)
+          * portfolio_fx_factor(
+              gross_currency,
+              ${filter.reporting_currency},
+              occurred_at::date
+            )
+        ),
+        0
+      ) AS fees,
+      coalesce(
+        sum(
+          abs(tax_amount)
+          * portfolio_fx_factor(
+              gross_currency,
+              ${filter.reporting_currency},
+              occurred_at::date
+            )
+        ),
+        0
+      ) AS taxes
     FROM app_transaction
     WHERE (${filter.from ?? null}::date IS NULL OR occurred_at::date >= ${filter.from ?? null}::date)
       AND (${filter.to ?? null}::date IS NULL OR occurred_at::date <= ${filter.to ?? null}::date)
