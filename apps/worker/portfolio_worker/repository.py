@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -13,7 +14,8 @@ from psycopg.types.json import Jsonb
 
 from .crypto import SecretEnvelope
 from .fingerprint import economic_fingerprint, sha256_json
-from .models import NormalizedEvent
+from .lots import InsufficientPosition, OpenLot, allocate_fifo
+from .models import EventType, NormalizedEvent
 
 
 class RepositoryError(RuntimeError):
@@ -136,6 +138,10 @@ class WorkerRepository:
         accepted = 0
         duplicates = 0
         with self.connection() as connection:
+            connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                (str(account_id),),
+            )
             for event in events:
                 event_fingerprint = economic_fingerprint(event)
                 instrument_id = self._ensure_instrument(connection, event)
@@ -269,6 +275,13 @@ class WorkerRepository:
                             ),
                         ),
                     )
+                self._update_lots(
+                    connection,
+                    account_id=account_id,
+                    instrument_id=instrument_id,
+                    event=event,
+                    event_id=event_row[0],
+                )
             connection.execute(
                 """
                 UPDATE raw_import
@@ -281,6 +294,114 @@ class WorkerRepository:
                 (len(events), accepted, duplicates, raw_import_id),
             )
         return accepted, duplicates
+
+    def _update_lots(
+        self,
+        connection: Connection[Any],
+        *,
+        account_id: UUID,
+        instrument_id: UUID | None,
+        event: NormalizedEvent,
+        event_id: UUID,
+    ) -> None:
+        if event.event_type not in {EventType.BUY, EventType.SELL}:
+            return
+        if instrument_id is None or event.quantity_delta is None:
+            raise RepositoryError("trade is missing an instrument or quantity")
+        if event.gross_currency is None:
+            raise RepositoryError("trade is missing its gross currency")
+
+        if event.event_type is EventType.BUY:
+            if event.quantity_delta <= 0:
+                raise RepositoryError("buy quantity must be positive")
+            principal = event.gross_amount
+            if principal is None:
+                if event.unit_price is None:
+                    raise RepositoryError("buy is missing gross amount and unit price")
+                principal = event.quantity_delta * event.unit_price
+            charges = sum(
+                (
+                    abs(leg.amount)
+                    for leg in event.cash_legs
+                    if leg.leg_type.value in {"FEE", "TAX"}
+                ),
+                Decimal("0"),
+            )
+            connection.execute(
+                """
+                INSERT INTO lot (
+                  account_id, instrument_id, opening_event_id, opened_at,
+                  original_quantity, remaining_quantity, acquisition_cost,
+                  cost_currency
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    account_id,
+                    instrument_id,
+                    event_id,
+                    event.occurred_at,
+                    event.quantity_delta,
+                    event.quantity_delta,
+                    abs(principal) + charges,
+                    event.gross_currency,
+                ),
+            )
+            return
+
+        if event.quantity_delta >= 0:
+            raise RepositoryError("sell quantity must be negative")
+        rows = connection.execute(
+            """
+            SELECT id, original_quantity, remaining_quantity, acquisition_cost
+            FROM lot
+            WHERE account_id = %s
+              AND instrument_id = %s
+              AND remaining_quantity > 0
+            ORDER BY opened_at, created_at, id
+            FOR UPDATE
+            """,
+            (account_id, instrument_id),
+        ).fetchall()
+        lots = tuple(
+            OpenLot(
+                id=row[0],
+                original_quantity=row[1],
+                remaining_quantity=row[2],
+                acquisition_cost=row[3],
+            )
+            for row in rows
+        )
+        try:
+            allocations = allocate_fifo(lots, abs(event.quantity_delta))
+        except InsufficientPosition as error:
+            raise RepositoryError(
+                "sell exceeds the FIFO position; short sales are not supported"
+            ) from error
+
+        for allocation in allocations:
+            connection.execute(
+                """
+                INSERT INTO lot_allocation (
+                  lot_id, closing_event_id, quantity, allocated_cost
+                )
+                VALUES (%s, %s, %s, %s)
+                """,
+                (
+                    allocation.lot_id,
+                    event_id,
+                    allocation.quantity,
+                    allocation.allocated_cost,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE lot
+                SET remaining_quantity = remaining_quantity - %s
+                WHERE id = %s
+                """,
+                (allocation.quantity, allocation.lot_id),
+            )
 
     def store_secret(
         self,
