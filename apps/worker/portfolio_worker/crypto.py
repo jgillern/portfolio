@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 from dataclasses import dataclass
@@ -87,7 +88,7 @@ class SecretBox:
         secret_type: str,
     ) -> bytes:
         aad = self._aad(account_id, secret_type, envelope.key_version)
-        if not hashlib.compare_digest(hashlib.sha256(aad).digest(), envelope.aad_hash):
+        if not hmac.compare_digest(hashlib.sha256(aad).digest(), envelope.aad_hash):
             raise InvalidSecret("secret context does not match")
         try:
             return AESGCM(
