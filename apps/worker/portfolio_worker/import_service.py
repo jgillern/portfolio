@@ -5,7 +5,8 @@ from datetime import UTC, datetime
 
 from .archive import EncryptedArchive
 from .fingerprint import source_fingerprint
-from .parsers import PatriaHtmlParser, XtbCsvParser
+from .parsers import GeorgePdfParser, PatriaHtmlParser, XtbCsvParser, XtbPdfParser
+from .parsers.pdf import extract_pdf_text
 from .parsers.base import ParseError
 from .repository import WorkerRepository
 
@@ -39,6 +40,7 @@ class ImportService:
         received_at: datetime | None = None,
         gmail_message_id: str | None = None,
         mime_part_id: str | None = None,
+        pdf_password: str | None = None,
     ) -> ImportResult:
         received = received_at or datetime.now(UTC)
         broker = broker_code.upper()
@@ -52,6 +54,16 @@ class ImportService:
             parser = XtbCsvParser()
             events = parser.parse(payload.decode("utf-8-sig"), account_ref=account_ref)
             document_type = "XTB_HISTORY_CSV"
+        elif broker == "XTB" and content_type == "application/pdf":
+            parser = XtbPdfParser()
+            text = extract_pdf_text(payload, password=pdf_password)
+            events = parser.parse(text, account_ref=account_ref)
+            document_type = "XTB_STATEMENT_PDF"
+        elif broker == "GEORGE" and content_type == "application/pdf":
+            parser = GeorgePdfParser()
+            text = extract_pdf_text(payload)
+            events = parser.parse(text, account_ref=account_ref)
+            document_type = "GEORGE_STATEMENT_PDF"
         else:
             raise ParseError("unsupported broker document type")
 
