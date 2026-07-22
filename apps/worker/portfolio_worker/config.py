@@ -21,6 +21,8 @@ class Settings:
     gmail_redirect_uri: str | None
     gmail_import_rules_json: str | None
     app_base_url: str | None
+    twelve_data_api_key: str | None
+    alpha_vantage_api_key: str | None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -36,6 +38,8 @@ class Settings:
             gmail_redirect_uri=os.getenv("GMAIL_REDIRECT_URI"),
             gmail_import_rules_json=os.getenv("GMAIL_IMPORT_RULES_JSON"),
             app_base_url=os.getenv("APP_BASE_URL"),
+            twelve_data_api_key=os.getenv("TWELVE_DATA_API_KEY"),
+            alpha_vantage_api_key=os.getenv("ALPHA_VANTAGE_API_KEY"),
         )
 
     def require(self, name: str) -> str:

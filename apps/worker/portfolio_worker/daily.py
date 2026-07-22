@@ -10,6 +10,7 @@ from .archive import EncryptedArchive, VercelBlobWriter
 from .config import Settings
 from .crypto import SecretBox
 from .gmail_sync import GmailSync
+from .market_sync import MarketSync
 from .providers.fx import CnbFxProvider, EcbFxProvider
 
 
@@ -169,6 +170,15 @@ def build_daily_steps(
             "ecb_status": ecb_status,
         }
 
+    def refresh_prices() -> dict[str, Any]:
+        result = MarketSync(repository, settings).run()
+        return {
+            "imported": result.imported,
+            "fallback_used": result.fallback_used,
+            "skipped": result.skipped,
+            "errors": result.errors,
+        }
+
     def rebuild_snapshots() -> dict[str, Any]:
         counts = {
             currency: repository.rebuild_position_snapshots(run_date, currency)
@@ -211,6 +221,7 @@ def build_daily_steps(
     return (
         DailyStep("sync_gmail", sync_gmail),
         DailyStep("refresh_fx", refresh_fx),
+        DailyStep("refresh_prices", refresh_prices),
         DailyStep("rebuild_snapshots", rebuild_snapshots),
         DailyStep("quality_checks", quality_checks),
         DailyStep("encrypted_backup", backup),

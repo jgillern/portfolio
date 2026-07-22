@@ -917,3 +917,79 @@ class WorkerRepository:
         if row is None:
             raise RepositoryError("connector is not configured")
         return int(row[0])
+
+    def list_price_targets(self) -> list[dict[str, Any]]:
+        with self.connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                      l.id AS listing_id,
+                      l.instrument_id,
+                      l.trading_currency AS currency,
+                      l.provider_symbols
+                    FROM listing l
+                    JOIN instrument i ON i.id = l.instrument_id
+                    WHERE l.is_primary
+                       OR NOT EXISTS (
+                         SELECT 1
+                         FROM listing primary_listing
+                         WHERE primary_listing.instrument_id = i.id
+                           AND primary_listing.is_primary
+                       )
+                    ORDER BY l.instrument_id, l.is_primary DESC, l.created_at
+                    """
+                )
+                rows = cursor.fetchall()
+        seen: set[UUID] = set()
+        targets: list[dict[str, Any]] = []
+        for row in rows:
+            instrument_id = row["instrument_id"]
+            if instrument_id in seen:
+                continue
+            seen.add(instrument_id)
+            targets.append(
+                {
+                    "listing_id": row["listing_id"],
+                    "instrument_id": instrument_id,
+                    "currency": str(row["currency"]).strip(),
+                    "provider_symbols": dict(
+                        row["provider_symbols"] or {}
+                    ),
+                }
+            )
+        return targets
+
+    def upsert_price_quote(
+        self,
+        *,
+        listing_id: UUID,
+        instrument_id: UUID,
+        quote: Any,
+    ) -> None:
+        with self.connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO price (
+                  listing_id, instrument_id, price_date, close,
+                  currency, provider, quality, retrieved_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, 'VERIFIED', now())
+                ON CONFLICT (
+                  instrument_id, listing_id, price_date, provider
+                )
+                DO UPDATE SET
+                  close = EXCLUDED.close,
+                  currency = EXCLUDED.currency,
+                  quality = EXCLUDED.quality,
+                  retrieved_at = EXCLUDED.retrieved_at
+                """,
+                (
+                    listing_id,
+                    instrument_id,
+                    quote.price_date,
+                    quote.close,
+                    quote.currency,
+                    quote.provider,
+                ),
+            )
