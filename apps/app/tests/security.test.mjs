@@ -18,6 +18,9 @@ test("owner session is HTTP-only, strict and signed", () => {
   assert.match(auth, /timingSafeEqual/);
   assert.match(session, /sameSite: "strict"/);
   assert.match(session, /httpOnly: true/);
+  assert.match(session, /ATTEMPT_LIMIT = 5/);
+  assert.match(session, /status: 429/);
+  assert.match(session, /event: "owner_session"/);
 });
 
 test("MCP authenticates and exposes only named read tools", () => {

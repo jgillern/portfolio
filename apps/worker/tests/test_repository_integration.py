@@ -247,6 +247,7 @@ def test_repository_posts_fifo_and_rebuilds_performance_snapshots() -> None:
               market_value,
               net_external_flow,
               daily_twr,
+              cumulative_twr,
               realized_result,
               unrealized_result,
               fees
@@ -265,6 +266,7 @@ def test_repository_posts_fifo_and_rebuilds_performance_snapshots() -> None:
     assert snapshot[0] == Decimal("1185")
     assert snapshot[1] == Decimal("0")
     assert snapshot[2] == pytest.approx(Decimal("195") / Decimal("990"))
-    assert snapshot[3] == Decimal("71")
-    assert snapshot[4] == Decimal("114")
-    assert snapshot[5] == Decimal("15")
+    assert snapshot[3] == snapshot[2]
+    assert snapshot[4] == Decimal("71")
+    assert snapshot[5] == Decimal("114")
+    assert snapshot[6] == Decimal("15")

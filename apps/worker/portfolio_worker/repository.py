@@ -934,7 +934,11 @@ class WorkerRepository:
                 END,
                 cumulative_twr = CASE
                   WHEN previous.prior_value IS NULL
-                    OR previous.prior_value = 0
+                    THEN CASE
+                      WHEN current.quality = 'MISSING' THEN NULL
+                      ELSE 0
+                    END
+                  WHEN previous.prior_value = 0
                     OR current.quality = 'MISSING'
                     THEN previous.prior_twr
                   ELSE
@@ -1157,6 +1161,35 @@ class WorkerRepository:
                 )
             WHERE current.snapshot_date = %s
               AND current.reporting_currency = %s
+            """,
+            (snapshot_date, reporting_currency),
+        )
+        connection.execute(
+            """
+            UPDATE portfolio_snapshot current
+            SET quality = 'MISSING'::data_quality
+            WHERE current.snapshot_date = %s
+              AND current.reporting_currency = %s
+              AND EXISTS (
+                SELECT 1
+                FROM cash_leg cl
+                JOIN ledger_event le ON le.id = cl.ledger_event_id
+                JOIN account a ON a.id = le.account_id
+                WHERE le.occurred_at::date <= current.snapshot_date
+                  AND portfolio_fx_factor(
+                    cl.currency,
+                    current.reporting_currency,
+                    le.occurred_at::date
+                  ) IS NULL
+                  AND (
+                    current.account_id IS NULL
+                    OR le.account_id = current.account_id
+                  )
+                  AND (
+                    current.tax_wrapper IS NULL
+                    OR a.tax_wrapper = current.tax_wrapper
+                  )
+              )
             """,
             (snapshot_date, reporting_currency),
         )
