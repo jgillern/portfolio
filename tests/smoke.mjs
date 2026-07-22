@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 
 const port = 3210;
 const server = spawn(
@@ -20,6 +21,7 @@ const server = spawn(
       DATA_MODE: "synthetic",
       VERCEL_ENV: "preview",
     },
+    detached: process.platform !== "win32",
     shell: process.platform === "win32",
     stdio: ["ignore", "pipe", "pipe"],
   },
@@ -75,5 +77,15 @@ try {
   assert.equal(body.data.meta.currency, "EUR");
   console.log("Production smoke checks passed.");
 } finally {
-  server.kill("SIGTERM");
+  if (server.pid && process.platform !== "win32") {
+    process.kill(-server.pid, "SIGTERM");
+  } else {
+    server.kill("SIGTERM");
+  }
+  server.stdout.destroy();
+  server.stderr.destroy();
+  await Promise.race([
+    once(server, "exit"),
+    new Promise((resolve) => setTimeout(resolve, 2_000)),
+  ]);
 }
