@@ -73,6 +73,17 @@ jobs:
           for migration in migrations/*.sql; do
             psql "$PGURL" -v ON_ERROR_STOP=1 -f "$migration"
           done
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Run repository integration test
+        working-directory: apps/worker
+        run: |
+          uv sync --all-groups
+          uv run pytest tests/test_repository_integration.py
       - name: Verify read role can use safe views
         run: |
           psql "$PGURL" -v ON_ERROR_STOP=1 \
