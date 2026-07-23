@@ -44,6 +44,13 @@ class ImportService:
     ) -> ImportResult:
         received = received_at or datetime.now(UTC)
         broker = broker_code.upper()
+        account_id = self._repository.resolve_account(broker, account_ref)
+        if source_channel == "CHATGPT" and (
+            broker != "GEORGE"
+            or content_type != "application/pdf"
+            or self._repository.account_tax_wrapper(account_id) != "DIP"
+        ):
+            raise ParseError("CHATGPT_IMPORT_REQUIRES_GEORGE_DIP_PDF")
         if broker == "PATRIA" and content_type.startswith("text/html"):
             parser = PatriaHtmlParser()
             events = parser.parse(payload.decode("utf-8"), account_ref=account_ref)
@@ -61,7 +68,7 @@ class ImportService:
             document_type = "XTB_STATEMENT_PDF"
         elif broker == "GEORGE" and content_type == "application/pdf":
             parser = GeorgePdfParser()
-            text = extract_pdf_text(payload)
+            text = extract_pdf_text(payload, password=pdf_password)
             events = parser.parse(text, account_ref=account_ref)
             document_type = "GEORGE_STATEMENT_PDF"
         else:
@@ -79,7 +86,6 @@ class ImportService:
                 payload=payload,
             ).pathname
 
-        account_id = self._repository.resolve_account(broker, account_ref)
         import_id, created = self._repository.register_import(
             broker_code=broker,
             account_id=account_id,
