@@ -23,7 +23,7 @@ test("owner session is HTTP-only, strict and signed", () => {
   assert.match(session, /event: "owner_session"/);
 });
 
-test("MCP authenticates and exposes only named read tools", () => {
+test("MCP authenticates and exposes named reads plus one scoped import", () => {
   assert.match(mcp, /verifyMcpBearer/);
   assert.doesNotMatch(mcp, /execute_sql|query_sql|registerResource/);
   const tools = [...mcp.matchAll(/server\.registerTool\(\s*"([^"]+)"/g)].map(
@@ -39,7 +39,12 @@ test("MCP authenticates and exposes only named read tools", () => {
     "get_data_quality_issues",
     "get_income_and_costs",
     "get_methodology",
+    "import_george_dip_statement",
   ]);
+  assert.match(mcp, /"openai\/fileParams": \["statement"\]/);
+  assert.match(mcp, /readOnlyHint: false/);
+  assert.match(mcp, /CHATGPT/);
+  assert.doesNotMatch(mcp, /place_order|execute_trade|generic_write/);
 });
 
 test("read API requires the owner session and disables caching", () => {
