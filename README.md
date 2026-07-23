@@ -14,7 +14,7 @@ Tento dokument je produktová a technická specifikace pro první fázi vývoje.
 
 Aplikace má:
 
-- automaticky načítat data z Patria Finance, XTB a České spořitelny / George;
+- automaticky načítat data z Patria Finance, XTB a klasického portfolia České spořitelny / George; DIP u České spořitelny aktualizovat řízeným ručním importem;
 - vést úplnou a auditovatelnou historii transakcí, nikoli pouze aktuální pozice;
 - agregovat všechny účty do jednoho dashboardu;
 - současně umožnit filtrovat portfolio podle brokera, účtu a režimu `DIP` / `STANDARD`;
@@ -22,7 +22,7 @@ Aplikace má:
 - porovnávat výkonnost s proxy benchmarky S&P 500, MSCI World a MSCI ACWI;
 - ukazovat ekonomickou expozici podle tříd aktiv, sektorů, zemí a měn;
 - ukazovat základní look-through expozici fondů a skutečné podkladové pozice;
-- poskytovat detailní, výhradně read-only přístup z běžných chatů v ChatGPT;
+- poskytovat detailní read-only analytiku z běžných chatů v ChatGPT a jedinou omezenou akci pro import výpisu České spořitelny do DIP;
 - minimalizovat ruční práci při každé aktualizaci.
 
 ### Hlavní produktové principy
@@ -33,7 +33,7 @@ Aplikace má:
 4. **Kontejner není expozice.** DIP je daňový režim účtu, ETF je právní forma instrumentu a akcie je ekonomická expozice. Tyto dimenze se vedou odděleně.
 5. **Denní data jsou dostačující.** Aplikace není tradingový terminál a v první fázi nepotřebuje placená real-time data.
 6. **Každé číslo musí být vysvětlitelné.** U ceny, FX kurzu, expozice i importu se ukládá zdroj, čas a kvalita.
-7. **AI má pouze čtecí přístup.** ChatGPT nikdy nedostane obecný SQL nástroj, přístup k brokerskému účtu ani možnost měnit portfolio.
+7. **AI má čtecí přístup a jedinou řízenou importní výjimku.** ChatGPT nikdy nedostane obecný SQL nástroj, přístup k brokerskému účtu ani možnost zadat obchod. Smí pouze předat přiložený PDF výpis workeru pro předem nakonfigurovaný účet `GEORGE + DIP`; worker znovu ověří rozsah, dešifruje dokument a provede idempotentní import.
 8. **Cílový hosting je Vercel Hobby.** Produkční web, API a importní úlohy se nasazují z tohoto GitHub monorepa na bezplatný tarif Vercel Hobby. Návrh nesmí vyžadovat automatický upgrade, placený Vercel produkt ani lokální komponentu; při dosažení free-tier limitu má bezpečně omezit nepovinné úlohy a upozornit uživatele.
 
 ## 2. Rozsah
@@ -49,8 +49,8 @@ Aplikace má:
 | Výkonnost | hodnota portfolia, zisk/ztráta, TWR, XIRR, realizovaný a nerealizovaný výsledek, náklady a příjmy |
 | Benchmarky | volitelně S&P 500, MSCI World, MSCI ACWI prostřednictvím jasně označených ETF proxy |
 | Expozice | ekonomická třída aktiv, sektor, geografie, měna, základní look-through a míra jeho pokrytí |
-| Automatizace | e-mailový import pro George, XTB a realizované obchody z Patrie; kontrolní výpisy a řízený fallback pro úplnost a reconciliaci |
-| ChatGPT | read-only Portfolio API a MCP endpoint zabalené jako soukromá ChatGPT app; bez obecného SQL a write nástrojů |
+| Automatizace | e-mailový import pro klasické portfolio George, XTB a realizované obchody z Patrie; George DIP přes ruční PDF import z dashboardu nebo ChatGPT; kontrolní výpisy a řízený fallback pro úplnost a reconciliaci |
+| ChatGPT | read-only Portfolio API a soukromá MCP app; navíc jediný úzce omezený file-import nástroj pro George DIP, bez obecného SQL, obchodních pokynů a jiných write nástrojů |
 | Provoz | cloud-only single-user aplikace ve dvou projektech na Vercel Hobby; bez lokálního agenta, s auditem importů, monitoringem čerstvosti, kapacity a zálohami |
 
 ### Výslovně mimo fázi 1
@@ -274,18 +274,28 @@ E-mail je transport a archiv vstupu, nikoli databáze portfolia.
 
 Známý vstup:
 
-- elektronický „Přehled obchodů“ zasílaný e-mailem po každé investiční transakci;
-- elektronický „Přehled portfolia“ jako kontrolní snapshot, podle nastavení klienta;
-- případné historické PDF pro prvotní backfill.
+- elektronický „Přehled obchodů“ pro klasické portfolio, zasílaný e-mailem po investiční transakci;
+- PDF je zaheslované; heslem je rok narození uživatele a ukládá se per účet pouze v aplikačně šifrované podobě stejně jako heslo k XTB PDF;
+- dokument odděluje provedené obchody od podaných a dosud neprovedených pokynů. Do ledgeru se smějí zapsat pouze provedené transakce;
+- Česká spořitelna automatické zasílání pro DIP nepodporuje. DIP proto používá ruční PDF výpis, primárně přiložený do chatu s Portfolio app, případně nahraný v dashboardu;
+- případné historické PDF lze použít pro prvotní backfill.
 
-Tok:
+Tok klasického portfolia:
 
-1. George odešle výpis do hlavní schránky.
+1. George odešle zaheslovaný výpis do hlavní schránky.
 2. Pravidlo jej automaticky přepošle do portfolio Gmailu.
 3. Gmail adaptér ověří odesílatele, předmět, MIME typ a kontrolní součet přílohy.
-4. Parser vytěží obchod, poplatek, daň, měnu, ISIN a účet.
-5. Normalizované události se zapíší do ledgeru.
-6. Portfolio výpis se použije pro reconciliaci množství a hotovosti.
+4. Worker načte zašifrované heslo příslušného účtu, PDF dešifruje pouze v paměti a archivuje jen původní šifrovaný vstup.
+5. Parser vytěží provedený obchod, poplatek, měnu, ISIN a účet; otevřené pokyny ignoruje.
+6. Normalizované události se idempotentně zapíší do ledgeru.
+
+Tok DIP:
+
+1. Uživatel v běžném chatu přiloží PDF a požádá Portfolio app o aktualizaci konkrétního DIP účtu.
+2. ChatGPT předá dočasnou file reference jedinému nástroji `import_george_dip_statement`.
+3. `portfolio-app` stáhne nejvýše 10 MB PDF a podepsaným interním požadavkem je předá workeru.
+4. Worker před zpracováním ověří `broker = GEORGE` a `tax_wrapper = DIP`; heslo ani master key nejsou dostupné ChatGPT ani app projektu.
+5. Opakované nahrání stejného dokumentu skončí jako bezpečná duplicita.
 
 PSD2 rozhraní banky se pro investiční portfolio nepovažuje za primární cestu; open-banking API jsou zaměřená hlavně na platební účty.
 
@@ -310,9 +320,9 @@ Strategie:
 - heslo k PDF uložené per účet pouze v aplikačně šifrované podobě; dešifrovat ho smí jen importní projekt;
 - CSV/HTML import ponechat jako nouzový fallback a diagnostický nástroj.
 
-#### Uložení hesla k XTB PDF
+#### Uložení hesel k XTB a George PDF
 
-Heslo k dokumentům není přihlašovací heslo do XTB. Aplikace v první fázi neukládá žádné přihlašovací údaje k brokerskému účtu. Pro Vercel Hobby se nepoužije placený AWS Secrets Manager.
+Hesla k dokumentům nejsou přihlašovací údaje k brokerským účtům. U České spořitelny jde o čtyřmístný rok narození. Aplikace v první fázi neukládá žádné přihlašovací údaje k brokerům. Pro Vercel Hobby se nepoužije placený AWS Secrets Manager.
 
 - jednorázově se vygeneruje 32bajtový `MASTER_ENCRYPTION_KEY`; jako Vercel Sensitive Environment Variable bude dostupný pouze produkčnímu projektu `portfolio-worker`;
 - uživatel zadá heslo přes přihlášený formulář a TLS; worker jej okamžitě zašifruje pomocí AES-256-GCM s novým náhodným nonce a associated data obsahujícími účet, typ secretu a verzi;
@@ -329,7 +339,7 @@ Tento model zůstává bezplatný a omezuje dopad úniku samotné databáze, nen
 PDF pipeline:
 
 1. ověřit povoleného odesílatele, MIME typ a hash šifrované přílohy;
-2. načíst heslo podle XTB účtu a dešifrovat PDF v paměti;
+2. načíst správný typ hesla podle XTB nebo George účtu a dešifrovat PDF v paměti;
 3. preferovat textovou a tabulkovou vrstvu PDF, OCR použít jen jako označený fallback;
 4. rozpoznat typ dokumentu a jednotlivé sekce;
 5. vytvořit rodičovský broker order a jednu nebo více execution legs;
@@ -472,13 +482,13 @@ flowchart TD
 | Komponenta | Odpovědnost |
 | --- | --- |
 | Hosting a CI/CD | dva bezplatné Vercel Hobby projekty napojené na jeden GitHub repozitář |
-| `portfolio-app` | Next.js / React; dashboard, single-user přihlášení, read-only Route Handlers, REST API, MCP endpoint a import health |
+| `portfolio-app` | Next.js / React; dashboard, single-user přihlášení, read-only REST, MCP a podepsané předání ručních importů workeru |
 | `portfolio-worker` | Python Vercel Functions; Gmail synchronizace, parsování, ceny, FX, fund holdings, snapshots, reconciliace a zálohy |
 | Scheduler | Vercel Hobby Cron jednou denně; stejné idempotentní zpracování lze spustit chráněným „Synchronizovat nyní“ |
 | Databáze | Neon PostgreSQL Free; canonical ledger, šifrované dynamické secrety a odvozené snapshoty |
 | Raw archive | privátní Vercel Blob; originální dokumenty navíc aplikačně šifrované před uložením |
-| Secrets | `MASTER_ENCRYPTION_KEY` jako Vercel Sensitive Environment Variable jen v `portfolio-worker`; Gmail token a XTB heslo jako AES-256-GCM ciphertext v Neon |
-| ChatGPT | read-only MCP nástroje jako součást `portfolio-app`; žádný samostatný AI backend |
+| Secrets | `MASTER_ENCRYPTION_KEY` jako Vercel Sensitive Environment Variable jen v `portfolio-worker`; Gmail token a XTB/George PDF hesla jako AES-256-GCM ciphertext v Neon |
+| ChatGPT | read-only MCP analytika a jediný file-import pro George DIP jako součást `portfolio-app`; žádný samostatný AI backend |
 
 Samostatný třetí projekt pro read API se nepoužije. Next.js Route Handlers obslouží dashboardové API i `/mcp`; výpočty a snapshots připravuje worker a aplikace je čte přes omezenou databázovou roli. Tím odpadají další deployment, URL, CORS, vzájemná autentizace a synchronizace preview prostředí.
 
@@ -501,7 +511,7 @@ Cílová varianta:
 - přístup je single-user; konkrétní autentizační knihovna se zvolí při implementaci bez budování obecného multi-user systému;
 - serverový Gmail adaptér používá aplikačně šifrovaný OAuth refresh token a funguje i při vypnutém počítači uživatele;
 - heslo k XTB PDF je samostatný verzovaný šifrovaný záznam dostupný pouze workeru;
-- Vercel Sensitive Environment Variables drží statickou deployment konfiguraci a master key. Uživatelsky měnitelné XTB heslo a Gmail refresh token jsou zašifrované v Neon, takže jejich změna nevyžaduje redeploy;
+- Vercel Sensitive Environment Variables drží statickou deployment konfiguraci a master key. Uživatelsky měnitelná XTB/George PDF hesla a Gmail refresh token jsou zašifrované v Neon, takže jejich změna nevyžaduje redeploy;
 - privilegované akce z UI, například „Synchronizovat nyní“, upload nebo změna XTB hesla, volají úzký chráněný worker endpoint s krátkodobě podepsaným požadavkem; worker nevystavuje obecné write API;
 - raw dokumenty se před uložením aplikačně zašifrují klíčem odvozeným od master key pomocí HKDF s odděleným účelem a uloží do private Vercel Blob;
 - citlivé odpovědi používají `Cache-Control: private, no-store` a nesmí se uložit do Vercel CDN cache;
@@ -680,9 +690,9 @@ Uživatel má být schopný otevřít běžný chat, přidat svou Portfolio app 
 - „Proč se liší TWR a XIRR?“
 - „Jsou data všech brokerů aktuální a reconciliovaná?“
 
-### 10.2 Primární integrace: read-only ChatGPT app / MCP
+### 10.2 Primární integrace: soukromá ChatGPT app / MCP
 
-`portfolio-app` vystaví veřejný HTTPS `/mcp` endpoint nad stejnou read aplikační vrstvou jako dashboard. Soukromě připojená ChatGPT app nemá obecný HTTP proxy ani SQL nástroj; publikuje pouze omezené analytické nástroje:
+`portfolio-app` vystaví veřejný HTTPS `/mcp` endpoint nad stejnou read aplikační vrstvou jako dashboard. Soukromě připojená ChatGPT app nemá obecný HTTP proxy ani SQL nástroj; publikuje omezené analytické nástroje a jednu přesně vymezenou importní akci:
 
 ```text
 get_portfolio_summary
@@ -694,12 +704,15 @@ get_income_and_costs
 get_import_status
 get_data_quality_issues
 get_methodology
+get_accounts
+import_george_dip_statement  # jediný write nástroj; pouze GEORGE + DIP + PDF
 ```
+
+Analytické nástroje jsou read-only. Importní nástroj používá ChatGPT file param, je označen `readOnlyHint=false`, `destructiveHint=false`, `idempotentHint=true` a předá dokument pouze podepsanému worker endpointu. Anotace pomáhají ChatGPT správně popsat dopad a vyžádat schválení podle nastavení uživatele; bezpečnostní omezení vždy znovu vynucuje server.
 
 Každý nástroj:
 
-- je read-only;
-- má omezený rozsah parametrů a maximální velikost odpovědi;
+- má omezený rozsah parametrů a maximální velikost vstupu nebo odpovědi;
 - podporuje `DIP`, `STANDARD` i agregovaný pohled;
 - vrací `as_of`, `data_freshness`, `currency`, `methodology_version` a zdroje;
 - loguje přístup bez ukládání obsahu odpovědi s citlivými daty;
@@ -732,7 +745,7 @@ Povinná opatření:
 - OAuth scopes s nejmenším oprávněním, pro Gmail primárně read-only;
 - oddělené databázové role pro `portfolio-worker` a read-only `portfolio-app` včetně MCP;
 - pouze produkční `portfolio-worker` dostane `MASTER_ENCRYPTION_KEY`; `portfolio-app`, MCP a preview prostředí ho nedostanou;
-- Gmail refresh token a XTB PDF heslo jsou v databázi pouze jako AES-256-GCM ciphertext s unikátním nonce, auth tagem, associated data a verzí klíče;
+- Gmail refresh token a XTB/George PDF hesla jsou v databázi pouze jako AES-256-GCM ciphertext s unikátním nonce, auth tagem, associated data a verzí klíče;
 - Vercel Sensitive Environment Variable obsahuje jen dlouhodobě stabilní master key a statickou deployment konfiguraci; dynamické secrety lze měnit bez redeploye;
 - každé dešifrování a každá změna secretu se audituje bez hodnoty secretu;
 - master key má oddělenou recovery kopii v cloudovém password manageru a dokumentovaný rotační postup;
@@ -796,7 +809,7 @@ Vercel Function usage a Neon CU-hours se v první fázi kontrolují v dashboarde
 - změna vizuálního formátování Patria e-mailu nevede k OCR, pokud zůstává dostupná HTML tabulka;
 - XTB PDF se správným heslem se dešifruje v paměti; chybné heslo vytvoří bezpečnou, nerepetitivní chybu bez úniku hesla do logu;
 - XTB pokyn rozdělený na celý kus a frakční právo vytvoří jeden rodičovský pokyn a dva legy, nikoli duplicitu;
-- pouze `portfolio-worker` má master key, write roli a oprávnění číst `encrypted_secret`; `portfolio-app` včetně MCP dostane explicitní `access denied`;
+- pouze `portfolio-worker` má master key, databázovou write roli a oprávnění číst `encrypted_secret`; `portfolio-app` včetně MCP dostane explicitní `access denied` a ruční import může pouze předat podepsanému worker endpointu;
 - změna jediného bitu v ciphertextu, nonce, auth tagu nebo associated data vede k bezpečnému selhání dešifrování;
 - rotační job znovu zašifruje a ověří všechny secrety před odstavením staré verze klíče;
 - serverový Gmail import a denní ocenění proběhnou i při vypnutém uživatelském počítači;
@@ -883,7 +896,7 @@ Vercel Function usage a Neon CU-hours se v první fázi kontrolují v dashboarde
 Fáze 1 je hotová, pokud:
 
 1. existuje kompletní počáteční historie pro Patrii, XTB a George nebo je každá známá mezera viditelně označena;
-2. nové George, XTB a Patria obchody z podporovaných e-mailů se bez ručního importu objeví v aplikaci;
+2. nové obchody klasického George portfolia, XTB a Patrie z podporovaných e-mailů se bez ručního importu objeví v aplikaci; George DIP lze aktualizovat přiložením výpisu do ChatGPT nebo dashboardu;
 3. Patria má funkční proces kontrolního výpisu/fallbacku a odděleně viditelnou čerstvost obchodů a poslední úplné reconciliace;
 4. opakovaný import nevytváří duplicity;
 5. vypočtené pozice se reconciliují s kontrolními výpisy;
@@ -892,7 +905,7 @@ Fáze 1 je hotová, pokud:
 8. graf porovnává portfolio se všemi třemi ETF proxy benchmarky;
 9. jsou dostupné TWR, XIRR, realizovaný/nerealizovaný výsledek, příjmy a náklady;
 10. asset-class, sektorová, geografická a měnová expozice ukazuje také míru pokrytí;
-11. ChatGPT může přes read-only rozhraní získat detail holdings, transakcí, výkonu, expozic a čerstvosti dat;
+11. ChatGPT může přes read-only rozhraní získat detail holdings, transakcí, výkonu, expozic a čerstvosti dat a přes jediný omezený nástroj importovat PDF pouze do účtu George DIP;
 12. žádný AI nástroj ani dashboard neumí zadat obchod;
 13. záloha byla úspěšně obnovena v odděleném prostředí;
 14. repozitář a test fixtures neobsahují osobní finanční data ani secrets;

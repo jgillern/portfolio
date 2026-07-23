@@ -10,7 +10,7 @@ Produkce používá právě dva Vercel projekty:
 - `portfolio-app`: Next.js UI, read-only REST a MCP. Zná pouze read-only Neon URL,
   hash hesla vlastníka, session secret a hash MCP bearer tokenu.
 - `portfolio-worker`: FastAPI importy a cron. Jako jediný zná write Neon URL,
-  master encryption key, Gmail OAuth secret, XTB PDF hesla a private Blob token.
+  master encryption key, Gmail OAuth secret, XTB/George PDF hesla a private Blob token.
 
 Preview prostředí nesmí zdědit produkční databázi, Blob ani secrets. Preview může používat
 pouze syntetická data a explicitní `ALLOW_PREVIEW_AUTH_BYPASS=true`.
@@ -33,11 +33,15 @@ pouze syntetická data a explicitní `ALLOW_PREVIEW_AUTH_BYPASS=true`.
 8. Vygenerovat nezávislé signing/session/cron/MCP klíče a 32bytový master key.
    Recovery kopii master key uložit do cloudového password manageru.
 9. Nakonfigurovat účty, listingy, provider symboly a tři ETF proxy benchmarky
-   `SP500`, `MSCI_WORLD`, `MSCI_ACWI`.
+   `SP500`, `MSCI_WORLD`, `MSCI_ACWI`. U každého XTB účtu uložit heslo k PDF;
+   u klasického i DIP účtu České spořitelny uložit jako `GEORGE_PDF_PASSWORD`
+   čtyřmístný rok narození. Hodnota se zadává pouze do přihlášeného dashboardu.
 10. Zapnout Vercel cron workeru a firewall limit pro `/api/session`,
     `/v1/manual/*`, `/v1/import/*` a OAuth callback.
-11. Projít první syntetický import, poté reprezentativní anonymizovaný dokument
-    každého brokera a nakonec historický backfill.
+11. Projít první syntetický import, poté reprezentativní dokument každého brokera
+    v bezpečném produkčním acceptance testu a nakonec historický backfill. Reálný
+    dokument ani jeho textovou extrakci neukládat do GitHubu. U České spořitelny
+    zvlášť ověřit zaheslovaný klasický e-mail a ruční DIP import z ChatGPT.
 12. Teprve po úspěšném smoke testu přepnout produkční DNS.
 
 CI i produkční build používají committed `pnpm-lock.yaml` a `apps/worker/uv.lock` ve frozen režimu.
@@ -60,7 +64,9 @@ do GitHubu ani do proměnných dostupných oběma projektům.
 1. `GET /health` workeru vrátí pouze technický stav bez secretů.
 2. Nepřihlášený dashboard a REST vrátí 401 nebo login; přihlášení nastaví
    HttpOnly, Secure a SameSite=Strict cookie.
-3. MCP bez bearer tokenu odmítne požadavek a s tokenem nabízí jen read-only tools.
+3. MCP bez bearer tokenu odmítne požadavek a s tokenem nabízí deset read-only
+   analytických tools a jediný write tool `import_george_dip_statement`. Pokus
+   použít jej pro jiného brokera nebo účet bez `DIP` worker odmítne.
 4. Ruční sync vytvoří `job_run`, opakování stejného importu nezvýší počet
    ledger událostí a chyba neobsahuje dokument ani secret.
 5. Denní job vytvoří CZK i EUR position/portfolio/exposure snapshots,

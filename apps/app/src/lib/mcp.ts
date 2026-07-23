@@ -10,7 +10,9 @@ import {
 } from "@portfolio/contracts";
 
 import { verifyMcpBearer } from "./auth";
+import { callWorker } from "./worker-client";
 import {
+  getAccounts,
   getDataQualityIssues,
   getExposures,
   getHoldings,
@@ -50,6 +52,109 @@ const readOnlyAnnotations = {
   openWorldHint: false,
 };
 
+const importAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+};
+
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
+const ChatGptFileSchema = z.object({
+  download_url: z.string().url(),
+  file_id: z.string().min(1),
+  mime_type: z.string().optional(),
+  file_name: z.string().optional(),
+});
+type ChatGptFile = z.infer<typeof ChatGptFileSchema>;
+
+function blockedDownloadHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) {
+    return true;
+  }
+  if (/^(127\.|10\.|169\.254\.|192\.168\.)/.test(host)) return true;
+  const match = /^172\.(\d+)\./.exec(host);
+  if (match && Number(match[1]) >= 16 && Number(match[1]) <= 31) return true;
+  return host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:");
+}
+
+async function downloadPdf(file: ChatGptFile): Promise<Uint8Array> {
+  if (file.mime_type && file.mime_type !== "application/pdf") {
+    throw new Error("Only PDF statements are accepted.");
+  }
+  const url = new URL(file.download_url);
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    blockedDownloadHost(url.hostname)
+  ) {
+    throw new Error("The temporary file URL is not allowed.");
+  }
+  const response = await fetch(url, {
+    headers: { Accept: "application/pdf" },
+    redirect: "error",
+    cache: "no-store",
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok || !response.body) {
+    throw new Error("The ChatGPT attachment could not be downloaded.");
+  }
+  const declaredLength = Number(response.headers.get("content-length") ?? "0");
+  if (declaredLength > MAX_PDF_BYTES) {
+    throw new Error("The PDF exceeds the 10 MB limit.");
+  }
+
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  const reader = response.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_PDF_BYTES) {
+      await reader.cancel();
+      throw new Error("The PDF exceeds the 10 MB limit.");
+    }
+    chunks.push(value);
+  }
+  if (!size) throw new Error("The PDF is empty.");
+  const payload = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    payload.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  if (new TextDecoder().decode(payload.subarray(0, 5)) !== "%PDF-") {
+    throw new Error("The attachment is not a PDF.");
+  }
+  return payload;
+}
+
+async function importGeorgeDipStatement(
+  accountRef: string,
+  file: ChatGptFile,
+): Promise<unknown> {
+  const payload = await downloadPdf(file);
+  const outbound = new FormData();
+  outbound.set("broker_code", "GEORGE");
+  outbound.set("account_ref", accountRef);
+  outbound.set("source_channel", "CHATGPT");
+  const pdfBuffer = new ArrayBuffer(payload.byteLength);
+  new Uint8Array(pdfBuffer).set(payload);
+  outbound.set(
+    "document",
+    new Blob([pdfBuffer], { type: "application/pdf" }),
+    (file.file_name ?? "george-dip.pdf").slice(0, 160),
+  );
+  return callWorker({
+    path: "/api/import",
+    body: outbound,
+    contentHashPayload: payload,
+  });
+}
+
 function filter(input: ToolFilter): PortfolioFilter {
   return {
     reporting_currency: input.reporting_currency ?? "CZK",
@@ -71,8 +176,8 @@ function result(data: unknown) {
 
 function createServer(): McpServer {
   const server = new McpServer({
-    name: "portfolio-readonly",
-    version: "0.1.0",
+    name: "portfolio-private",
+    version: "0.2.0",
   });
 
   server.registerTool(
@@ -178,6 +283,41 @@ function createServer(): McpServer {
       annotations: readOnlyAnnotations,
     },
     async () => result(await getMethodology()),
+  );
+
+  server.registerTool(
+    "get_accounts",
+    {
+      title: "Configured portfolio accounts",
+      description:
+        "Read account pseudonyms, brokers and tax wrappers. Use the name field as account_ref for a statement import.",
+      inputSchema: {},
+      annotations: readOnlyAnnotations,
+    },
+    async () => result(await getAccounts()),
+  );
+
+  server.registerTool(
+    "import_george_dip_statement",
+    {
+      title: "Import a George DIP statement",
+      description:
+        "Import one attached Ceska sporitelna/George PDF into the configured DIP account. " +
+        "Only completed transactions are posted; pending orders are ignored. " +
+        "The worker validates that the account is GEORGE + DIP before writing.",
+      inputSchema: {
+        account_ref: z.string().min(1).max(120),
+        statement: ChatGptFileSchema,
+      },
+      annotations: importAnnotations,
+      _meta: {
+        "openai/fileParams": ["statement"],
+        "openai/toolInvocation/invoking": "Importuji výpis ČS DIP…",
+        "openai/toolInvocation/invoked": "Výpis ČS DIP byl zpracován",
+      },
+    },
+    async ({ account_ref, statement }) =>
+      result(await importGeorgeDipStatement(account_ref, statement)),
   );
 
   return server;

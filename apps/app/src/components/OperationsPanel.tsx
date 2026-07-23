@@ -17,7 +17,9 @@ export function OperationsPanel({
 }): React.ReactNode {
   const [message, setMessage] = useState<string>("");
   const [busy, setBusy] = useState(false);
-  const xtbAccounts = accounts.filter((account) => brokerCode(account.broker) === "XTB");
+  const passwordAccounts = accounts.filter((account) =>
+    ["XTB", "GEORGE"].includes(brokerCode(account.broker)),
+  );
 
   async function connectGmail(): Promise<void> {
     setBusy(true);
@@ -69,12 +71,14 @@ export function OperationsPanel({
     setMessage("");
     const form = event.currentTarget;
     const data = new FormData(form);
+    const selection = String(data.get("account_secret") ?? "");
+    const [secretType, accountId] = selection.split("::", 2);
     const response = await fetch("/api/actions/secret", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        account_id: data.get("account_id"),
-        secret_type: "XTB_PDF_PASSWORD",
+        account_id: accountId,
+        secret_type: secretType,
         value: data.get("value"),
       }),
     });
@@ -123,13 +127,26 @@ export function OperationsPanel({
 
       <article className="panel operation-card">
         <p className="eyebrow">AES-256-GCM</p>
-        <h2>Heslo k XTB PDF</h2>
+        <h2>Hesla k PDF výpisům</h2>
+        <p>XTB i Česká spořitelna se ukládají odděleně pro každý účet.</p>
         <form onSubmit={password}>
-          <select name="account_id" required defaultValue="">
-            <option disabled value="">Vyberte XTB účet</option>
-            {xtbAccounts.map((account) => (
-              <option key={account.id} value={account.id}>{account.name}</option>
-            ))}
+          <select name="account_secret" required defaultValue="">
+            <option disabled value="">Vyberte účet</option>
+            {passwordAccounts.map((account) => {
+              const broker = brokerCode(account.broker);
+              const secretType =
+                broker === "GEORGE"
+                  ? "GEORGE_PDF_PASSWORD"
+                  : "XTB_PDF_PASSWORD";
+              return (
+                <option
+                  key={account.id}
+                  value={secretType + "::" + account.id}
+                >
+                  {account.name} · {account.broker}
+                </option>
+              );
+            })}
           </select>
           <input
             autoComplete="new-password"
@@ -138,7 +155,7 @@ export function OperationsPanel({
             required
             type="password"
           />
-          <button disabled={busy || !xtbAccounts.length} type="submit">Zašifrovat a uložit</button>
+          <button disabled={busy || !passwordAccounts.length} type="submit">Zašifrovat a uložit</button>
         </form>
       </article>
       <p className="operation-message" aria-live="polite">{message}</p>

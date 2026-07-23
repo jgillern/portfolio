@@ -30,6 +30,7 @@ class EventType(StrEnum):
 class SecretKind(StrEnum):
     GMAIL_REFRESH = "GMAIL_REFRESH_TOKEN"
     XTB_PDF = "XTB_PDF_PASSWORD"
+    GEORGE_PDF = "GEORGE_PDF_PASSWORD"
 
 
 class CashLegType(StrEnum):
