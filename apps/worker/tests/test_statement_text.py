@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from portfolio_worker.models import EventType, ExecutionLegType
+from portfolio_worker.models import CashLegType, EventType, ExecutionLegType
 from portfolio_worker.parsers import GeorgePdfParser
 from portfolio_worker.parsers.statement_text import XtbPdfParser
 
@@ -74,5 +74,5 @@ Nákup CP/Limit CZ0000000001 900.00 0.00
     assert event.gross_amount == Decimal("-898.00")
     assert event.settlement_date.isoformat() == "2026-07-22"
     assert event.metadata["pending_orders_ignored"] == 1
-    assert event.cash_legs[-1].leg_type is ExecutionLegType.__mro__[1] if False else event.cash_legs[-1].leg_type
+    assert event.cash_legs[-1].leg_type is CashLegType.FEE
     assert event.cash_legs[-1].amount == Decimal("-3.14")
