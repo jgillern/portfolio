@@ -1,0 +1,6 @@
+packages:
+  - apps/app
+  - packages/*
+
+allowBuilds:
+  sharp: true

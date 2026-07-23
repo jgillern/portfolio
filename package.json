@@ -1,0 +1,16 @@
+{
+  "name": "portfolio",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.15.1",
+  "engines": {
+    "node": "24.18.x"
+  },
+  "scripts": {
+    "build": "pnpm --filter @portfolio/contracts build && pnpm --filter @portfolio/app build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "check": "pnpm typecheck && pnpm test",
+    "smoke": "node tests/smoke.mjs"
+  }
+}
