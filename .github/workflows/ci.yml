@@ -37,7 +37,7 @@ jobs:
         working-directory: apps/worker
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - uses: astral-sh/setup-uv@v6
@@ -73,7 +73,7 @@ jobs:
           for migration in migrations/*.sql; do
             psql "$PGURL" -v ON_ERROR_STOP=1 -f "$migration"
           done
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - uses: astral-sh/setup-uv@v6
