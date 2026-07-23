@@ -39,6 +39,7 @@ test("MCP authenticates and exposes named reads plus one scoped import", () => {
     "get_data_quality_issues",
     "get_income_and_costs",
     "get_methodology",
+    "get_accounts",
     "import_george_dip_statement",
   ]);
   assert.match(mcp, /"openai\/fileParams": \["statement"\]/);
