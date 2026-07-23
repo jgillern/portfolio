@@ -40,3 +40,18 @@ def test_chatgpt_import_rejects_everything_except_george_dip(
             content_type="application/pdf",
             source_channel="CHATGPT",
         )
+
+
+def test_george_gmail_import_rejects_dip_account() -> None:
+    service = ImportService(AccountRepository("DIP"))  # type: ignore[arg-type]
+    with pytest.raises(
+        ParseError,
+        match="GEORGE_GMAIL_REQUIRES_STANDARD_ACCOUNT",
+    ):
+        service.import_payload(
+            broker_code="GEORGE",
+            account_ref="synthetic-account",
+            payload=b"%PDF-synthetic",
+            content_type="application/pdf",
+            source_channel="GMAIL",
+        )
