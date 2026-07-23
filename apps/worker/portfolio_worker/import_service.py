@@ -51,6 +51,12 @@ class ImportService:
             or self._repository.account_tax_wrapper(account_id) != "DIP"
         ):
             raise ParseError("CHATGPT_IMPORT_REQUIRES_GEORGE_DIP_PDF")
+        if (
+            source_channel == "GMAIL"
+            and broker == "GEORGE"
+            and self._repository.account_tax_wrapper(account_id) != "STANDARD"
+        ):
+            raise ParseError("GEORGE_GMAIL_REQUIRES_STANDARD_ACCOUNT")
         if broker == "PATRIA" and content_type.startswith("text/html"):
             parser = PatriaHtmlParser()
             events = parser.parse(payload.decode("utf-8"), account_ref=account_ref)
