@@ -22,7 +22,7 @@ from portfolio_worker.parsers.statement_text import StatementTextParser
 _ISIN = re.compile(r"\b[A-Z]{2}[A-Z0-9]{9}[0-9]\b")
 _DATE_TIME = re.compile(r"\b\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}(?::\d{2})?\b")
 _DATE_ONLY = re.compile(r"^\s*(\d{2}\.\d{2}\.\d{4})\b")
-_NUMBER = re.compile(r"(?<![A-Z0-9])-?\d+(?:[ .]\d{3})*(?:[.,]\d+)?(?![A-Z0-9])")
+_NUMBER = re.compile(r"(?<![A-Z0-9])-?\d+(?:[.,]\d+)?(?![A-Z0-9])")
 _ORDER_VENUE = re.compile(r"^\s*(\d{6,})\s+([A-Z0-9]{3,12})\b(.*)$")
 
 
