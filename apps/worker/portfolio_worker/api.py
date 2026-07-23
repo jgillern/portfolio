@@ -254,6 +254,14 @@ async def store_secret(
         timestamp=x_portfolio_timestamp,
         signature=x_portfolio_signature,
     )
+    if (
+        secret.secret_type == SecretKind.GEORGE_PDF.value
+        and (len(secret.value) != 4 or not secret.value.isdigit())
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="GEORGE_PASSWORD_MUST_BE_BIRTH_YEAR",
+        )
     settings = _settings()
     envelope = SecretBox(settings.require("master_encryption_key")).encrypt_secret(
         secret.value.encode(),
