@@ -64,7 +64,7 @@ do GitHubu ani do proměnných dostupných oběma projektům.
 1. `GET /health` workeru vrátí pouze technický stav bez secretů.
 2. Nepřihlášený dashboard a REST vrátí 401 nebo login; přihlášení nastaví
    HttpOnly, Secure a SameSite=Strict cookie.
-3. MCP bez bearer tokenu odmítne požadavek a s tokenem nabízí devět read-only
+3. MCP bez bearer tokenu odmítne požadavek a s tokenem nabízí deset read-only
    analytických tools a jediný write tool `import_george_dip_statement`. Pokus
    použít jej pro jiného brokera nebo účet bez `DIP` worker odmítne.
 4. Ruční sync vytvoří `job_run`, opakování stejného importu nezvýší počet
