@@ -141,9 +141,11 @@ async function importGeorgeDipStatement(
   outbound.set("broker_code", "GEORGE");
   outbound.set("account_ref", accountRef);
   outbound.set("source_channel", "CHATGPT");
+  const pdfBuffer = new ArrayBuffer(payload.byteLength);
+  new Uint8Array(pdfBuffer).set(payload);
   outbound.set(
     "document",
-    new Blob([payload], { type: "application/pdf" }),
+    new Blob([pdfBuffer], { type: "application/pdf" }),
     (file.file_name ?? "george-dip.pdf").slice(0, 160),
   );
   return callWorker({
