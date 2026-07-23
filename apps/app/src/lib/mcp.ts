@@ -12,6 +12,7 @@ import {
 import { verifyMcpBearer } from "./auth";
 import { callWorker } from "./worker-client";
 import {
+  getAccounts,
   getDataQualityIssues,
   getExposures,
   getHoldings,
@@ -280,6 +281,18 @@ function createServer(): McpServer {
       annotations: readOnlyAnnotations,
     },
     async () => result(await getMethodology()),
+  );
+
+  server.registerTool(
+    "get_accounts",
+    {
+      title: "Configured portfolio accounts",
+      description:
+        "Read account pseudonyms, brokers and tax wrappers. Use the name field as account_ref for a statement import.",
+      inputSchema: {},
+      annotations: readOnlyAnnotations,
+    },
+    async () => result(await getAccounts()),
   );
 
   server.registerTool(
