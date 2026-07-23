@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
@@ -19,6 +19,9 @@ from .import_service import ImportService
 from .models import SecretKind
 from .repository import RepositoryError, WorkerRepository
 from .security import InvalidSignature, content_hash, verify_request
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
 
 app = FastAPI(
     title="Portfolio worker",
@@ -145,11 +148,26 @@ async def import_document(
     broker_code: Annotated[str, Form()],
     account_ref: Annotated[str, Form()],
     document: Annotated[UploadFile, File()],
+    source_channel: Annotated[
+        Literal["UPLOAD", "CHATGPT"],
+        Form(),
+    ] = "UPLOAD",
     x_portfolio_timestamp: str | None = Header(default=None),
     x_portfolio_signature: str | None = Header(default=None),
     x_portfolio_content_sha256: str | None = Header(default=None),
 ) -> dict[str, str | int | bool]:
     payload = await document.read()
+    if not payload or len(payload) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="invalid document size")
+    broker = broker_code.upper()
+    content_type = document.content_type or "application/octet-stream"
+    if source_channel == "CHATGPT" and (
+        broker != "GEORGE" or content_type != "application/pdf"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="CHATGPT_IMPORT_REQUIRES_GEORGE_PDF",
+        )
     actual_hash = content_hash(payload)
     if not x_portfolio_content_sha256 or not hmac.compare_digest(
         actual_hash, x_portfolio_content_sha256
@@ -163,19 +181,29 @@ async def import_document(
     )
     repository = _repository()
     pdf_password = None
-    if broker_code.upper() == "XTB" and document.content_type == "application/pdf":
-        account_id = repository.resolve_account("XTB", account_ref)
-        secret_id, envelope = repository.load_active_secret(
-            account_id=account_id,
-            secret_type=SecretKind.XTB_PDF.value,
-        )
+    pdf_secret = {
+        "XTB": SecretKind.XTB_PDF,
+        "GEORGE": SecretKind.GEORGE_PDF,
+    }.get(broker)
+    if pdf_secret is not None and content_type == "application/pdf":
+        account_id = repository.resolve_account(broker, account_ref)
+        try:
+            secret_id, envelope = repository.load_active_secret(
+                account_id=account_id,
+                secret_type=pdf_secret.value,
+            )
+        except RepositoryError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="PDF_PASSWORD_NOT_CONFIGURED",
+            ) from exc
         try:
             pdf_password = SecretBox(
                 _settings().require("master_encryption_key")
             ).decrypt_secret(
                 envelope,
                 account_id=account_id,
-                secret_type=SecretKind.XTB_PDF.value,
+                secret_type=pdf_secret.value,
             ).decode()
         except (InvalidSecret, UnicodeDecodeError) as exc:
             repository.audit_secret_access(secret_id, outcome="FAILED")
@@ -186,10 +214,11 @@ async def import_document(
         repository.audit_secret_access(secret_id, outcome="SUCCESS")
     try:
         result = ImportService(repository, archive=_archive()).import_payload(
-            broker_code=broker_code,
+            broker_code=broker,
             account_ref=account_ref,
             payload=payload,
-            content_type=document.content_type or "application/octet-stream",
+            content_type=content_type,
+            source_channel=source_channel,
             pdf_password=pdf_password,
         )
     except (ValueError, RepositoryError) as exc:
@@ -204,7 +233,9 @@ async def import_document(
 
 class SecretInput(BaseModel):
     account_id: UUID | None = None
-    secret_type: str = Field(pattern=r"^(GMAIL_REFRESH_TOKEN|XTB_PDF_PASSWORD)$")
+    secret_type: str = Field(
+        pattern=r"^(GMAIL_REFRESH_TOKEN|XTB_PDF_PASSWORD|GEORGE_PDF_PASSWORD)$"
+    )
     value: str = Field(min_length=1, max_length=4096)
     key_version: int = Field(default=1, ge=1)
 
