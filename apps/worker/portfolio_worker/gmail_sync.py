@@ -151,8 +151,8 @@ class GmailSync:
         for part in parts:
             content_type = self._content_type(part)
             password = (
-                self._xtb_password(rule.account_ref)
-                if rule.broker_code == "XTB"
+                self._pdf_password(rule.broker_code, rule.account_ref)
+                if rule.broker_code in {"XTB", "GEORGE"}
                 and content_type == "application/pdf"
                 else None
             )
@@ -196,20 +196,24 @@ class GmailSync:
             return "text/html"
         return part.mime_type
 
-    def _xtb_password(self, account_ref: str) -> str:
+    def _pdf_password(self, broker_code: str, account_ref: str) -> str:
+        secret_kind = {
+            "XTB": SecretKind.XTB_PDF,
+            "GEORGE": SecretKind.GEORGE_PDF,
+        }[broker_code]
         account_id = self._repository.resolve_account(
-            "XTB",
+            broker_code,
             account_ref,
         )
         secret_id, envelope = self._repository.load_active_secret(
             account_id=account_id,
-            secret_type=SecretKind.XTB_PDF.value,
+            secret_type=secret_kind.value,
         )
         try:
             password = self._box.decrypt_secret(
                 envelope,
                 account_id=account_id,
-                secret_type=SecretKind.XTB_PDF.value,
+                secret_type=secret_kind.value,
             ).decode()
         except (InvalidSecret, UnicodeDecodeError):
             self._repository.audit_secret_access(
