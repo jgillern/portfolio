@@ -704,6 +704,7 @@ get_income_and_costs
 get_import_status
 get_data_quality_issues
 get_methodology
+get_accounts
 import_george_dip_statement  # jediný write nástroj; pouze GEORGE + DIP + PDF
 ```
 
