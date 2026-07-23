@@ -320,9 +320,9 @@ Strategie:
 - heslo k PDF uložené per účet pouze v aplikačně šifrované podobě; dešifrovat ho smí jen importní projekt;
 - CSV/HTML import ponechat jako nouzový fallback a diagnostický nástroj.
 
-#### Uložení hesla k XTB PDF
+#### Uložení hesel k XTB a George PDF
 
-Heslo k dokumentům není přihlašovací heslo do XTB. Aplikace v první fázi neukládá žádné přihlašovací údaje k brokerskému účtu. Pro Vercel Hobby se nepoužije placený AWS Secrets Manager.
+Hesla k dokumentům nejsou přihlašovací údaje k brokerským účtům. U České spořitelny jde o čtyřmístný rok narození. Aplikace v první fázi neukládá žádné přihlašovací údaje k brokerům. Pro Vercel Hobby se nepoužije placený AWS Secrets Manager.
 
 - jednorázově se vygeneruje 32bajtový `MASTER_ENCRYPTION_KEY`; jako Vercel Sensitive Environment Variable bude dostupný pouze produkčnímu projektu `portfolio-worker`;
 - uživatel zadá heslo přes přihlášený formulář a TLS; worker jej okamžitě zašifruje pomocí AES-256-GCM s novým náhodným nonce a associated data obsahujícími účet, typ secretu a verzi;
@@ -339,7 +339,7 @@ Tento model zůstává bezplatný a omezuje dopad úniku samotné databáze, nen
 PDF pipeline:
 
 1. ověřit povoleného odesílatele, MIME typ a hash šifrované přílohy;
-2. načíst heslo podle XTB účtu a dešifrovat PDF v paměti;
+2. načíst správný typ hesla podle XTB nebo George účtu a dešifrovat PDF v paměti;
 3. preferovat textovou a tabulkovou vrstvu PDF, OCR použít jen jako označený fallback;
 4. rozpoznat typ dokumentu a jednotlivé sekce;
 5. vytvořit rodičovský broker order a jednu nebo více execution legs;
@@ -487,7 +487,7 @@ flowchart TD
 | Scheduler | Vercel Hobby Cron jednou denně; stejné idempotentní zpracování lze spustit chráněným „Synchronizovat nyní“ |
 | Databáze | Neon PostgreSQL Free; canonical ledger, šifrované dynamické secrety a odvozené snapshoty |
 | Raw archive | privátní Vercel Blob; originální dokumenty navíc aplikačně šifrované před uložením |
-| Secrets | `MASTER_ENCRYPTION_KEY` jako Vercel Sensitive Environment Variable jen v `portfolio-worker`; Gmail token a XTB heslo jako AES-256-GCM ciphertext v Neon |
+| Secrets | `MASTER_ENCRYPTION_KEY` jako Vercel Sensitive Environment Variable jen v `portfolio-worker`; Gmail token a XTB/George PDF hesla jako AES-256-GCM ciphertext v Neon |
 | ChatGPT | read-only MCP analytika a jediný file-import pro George DIP jako součást `portfolio-app`; žádný samostatný AI backend |
 
 Samostatný třetí projekt pro read API se nepoužije. Next.js Route Handlers obslouží dashboardové API i `/mcp`; výpočty a snapshots připravuje worker a aplikace je čte přes omezenou databázovou roli. Tím odpadají další deployment, URL, CORS, vzájemná autentizace a synchronizace preview prostředí.
@@ -511,7 +511,7 @@ Cílová varianta:
 - přístup je single-user; konkrétní autentizační knihovna se zvolí při implementaci bez budování obecného multi-user systému;
 - serverový Gmail adaptér používá aplikačně šifrovaný OAuth refresh token a funguje i při vypnutém počítači uživatele;
 - heslo k XTB PDF je samostatný verzovaný šifrovaný záznam dostupný pouze workeru;
-- Vercel Sensitive Environment Variables drží statickou deployment konfiguraci a master key. Uživatelsky měnitelné XTB heslo a Gmail refresh token jsou zašifrované v Neon, takže jejich změna nevyžaduje redeploy;
+- Vercel Sensitive Environment Variables drží statickou deployment konfiguraci a master key. Uživatelsky měnitelná XTB/George PDF hesla a Gmail refresh token jsou zašifrované v Neon, takže jejich změna nevyžaduje redeploy;
 - privilegované akce z UI, například „Synchronizovat nyní“, upload nebo změna XTB hesla, volají úzký chráněný worker endpoint s krátkodobě podepsaným požadavkem; worker nevystavuje obecné write API;
 - raw dokumenty se před uložením aplikačně zašifrují klíčem odvozeným od master key pomocí HKDF s odděleným účelem a uloží do private Vercel Blob;
 - citlivé odpovědi používají `Cache-Control: private, no-store` a nesmí se uložit do Vercel CDN cache;
@@ -745,7 +745,7 @@ Povinná opatření:
 - OAuth scopes s nejmenším oprávněním, pro Gmail primárně read-only;
 - oddělené databázové role pro `portfolio-worker` a read-only `portfolio-app` včetně MCP;
 - pouze produkční `portfolio-worker` dostane `MASTER_ENCRYPTION_KEY`; `portfolio-app`, MCP a preview prostředí ho nedostanou;
-- Gmail refresh token a XTB PDF heslo jsou v databázi pouze jako AES-256-GCM ciphertext s unikátním nonce, auth tagem, associated data a verzí klíče;
+- Gmail refresh token a XTB/George PDF hesla jsou v databázi pouze jako AES-256-GCM ciphertext s unikátním nonce, auth tagem, associated data a verzí klíče;
 - Vercel Sensitive Environment Variable obsahuje jen dlouhodobě stabilní master key a statickou deployment konfiguraci; dynamické secrety lze měnit bez redeploye;
 - každé dešifrování a každá změna secretu se audituje bez hodnoty secretu;
 - master key má oddělenou recovery kopii v cloudovém password manageru a dokumentovaný rotační postup;
