@@ -15,7 +15,9 @@ export async function POST(request: Request): Promise<Response> {
   if (
     typeof input.account_id !== "string" ||
     !/^[0-9a-f-]{36}$/i.test(input.account_id) ||
-    input.secret_type !== "XTB_PDF_PASSWORD" ||
+    !new Set(["XTB_PDF_PASSWORD", "GEORGE_PDF_PASSWORD"]).has(
+      String(input.secret_type),
+    ) ||
     typeof input.value !== "string" ||
     input.value.length < 1 ||
     input.value.length > 4096
