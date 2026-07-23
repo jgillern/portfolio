@@ -174,8 +174,3 @@ class StatementTextParser:
 class XtbPdfParser(StatementTextParser):
     def __init__(self) -> None:
         super().__init__(broker_code="XTB", version="xtb-pdf-text-v1")
-
-
-class GeorgePdfParser(StatementTextParser):
-    def __init__(self) -> None:
-        super().__init__(broker_code="GEORGE", version="george-pdf-text-v1")
