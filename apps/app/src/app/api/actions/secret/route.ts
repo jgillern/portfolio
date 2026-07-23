@@ -19,6 +19,8 @@ export async function POST(request: Request): Promise<Response> {
       String(input.secret_type),
     ) ||
     typeof input.value !== "string" ||
+    (input.secret_type === "GEORGE_PDF_PASSWORD" &&
+      !/^\d{4}$/.test(input.value)) ||
     input.value.length < 1 ||
     input.value.length > 4096
   ) {
