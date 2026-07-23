@@ -47,6 +47,16 @@ class WorkerRepository:
             raise RepositoryError("configured account was not found")
         return row[0]
 
+    def account_tax_wrapper(self, account_id: UUID) -> str:
+        with self.connection() as connection:
+            row = connection.execute(
+                "SELECT tax_wrapper::text FROM account WHERE id = %s",
+                (account_id,),
+            ).fetchone()
+        if row is None:
+            raise RepositoryError("configured account was not found")
+        return str(row[0])
+
     def register_import(
         self,
         *,
